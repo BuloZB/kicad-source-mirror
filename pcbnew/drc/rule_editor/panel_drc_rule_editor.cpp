@@ -61,6 +61,8 @@
 #include "drc_re_numeric_input_overlay_panel.h"
 #include "drc_re_bool_input_overlay_panel.h"
 #include "drc_re_allowed_orientation_overlay_panel.h"
+#include "drc_re_matched_length_diff_pair_overlay_panel.h"
+#include "drc_re_vias_under_smd_overlay_panel.h"
 #include "drc_re_permitted_layers_overlay_panel.h"
 
 #include <eda_units.h>
@@ -73,7 +75,9 @@
 #include "drc_re_routing_width_constraint_data.h"
 #include "drc_re_permitted_layers_constraint_data.h"
 #include "drc_re_allowed_orientation_constraint_data.h"
+#include "drc_re_vias_under_smd_constraint_data.h"
 #include "drc_re_custom_rule_constraint_data.h"
+#include "drc_re_custom_rule_panel.h"
 #include <properties/property.h>
 #include <properties/property_mgr.h>
 
@@ -180,12 +184,16 @@ PANEL_DRC_RULE_EDITOR::PANEL_DRC_RULE_EDITOR( wxWindow* aParent, BOARD* aBoard,
     wxLogTrace( KI_TRACE_DRC_RULE_EDITOR, wxS( "[PANEL_DRC_RULE_EDITOR] inserting conditionGroupPanel" ) );
     m_conditionControlsSizer->Insert( 0, m_conditionGroupPanel, 0, wxEXPAND | wxBOTTOM, 5 );
 
-    m_nameCtrl->Bind( wxEVT_TEXT, [this]( wxCommandEvent& )
+    if( aConstraintType == CUSTOM_RULE )
     {
-        RULE_EDITOR_DIALOG_BASE* dlg = RULE_EDITOR_DIALOG_BASE::GetDialog( this );
-        if( dlg )
-            dlg->SetModified();
-    });
+        m_conditionGroupPanel->Hide();
+        m_conditionHeaderTitle->Hide();
+        m_syntaxHelp->Hide();
+        m_staticline8->Hide();
+        m_LayersComboBoxSizer->Show( false );
+        m_staticText711->Hide();
+        m_staticline111->Hide();
+    }
 
     m_commentCtrl->Bind( wxEVT_TEXT, [this]( wxCommandEvent& )                                                            
     {                                                                                                                   
@@ -197,6 +205,21 @@ PANEL_DRC_RULE_EDITOR::PANEL_DRC_RULE_EDITOR( wxWindow* aParent, BOARD* aBoard,
     // Hide the base class syntax check controls since we use inline validation
     m_checkSyntaxBtnCtrl->Hide();
     m_syntaxErrorReport->Hide();
+
+    m_nameCtrl->Bind( wxEVT_TEXT,
+                      [this]( wxCommandEvent& )
+                      {
+                          RULE_EDITOR_DIALOG_BASE* dlg = RULE_EDITOR_DIALOG_BASE::GetDialog( this );
+                          if( dlg )
+                              dlg->SetModified();
+
+                          if( m_constraintType == CUSTOM_RULE )
+                          {
+                              auto* customPanel = dynamic_cast<DRC_RE_CUSTOM_RULE_PANEL*>( m_constraintPanel );
+                              if( customPanel )
+                                  customPanel->UpdateRuleName( m_nameCtrl->GetValue() );
+                          }
+                      } );
 
     m_netClassRegex.Compile( "^NetClass\\s*[!=]=\\s*$", wxRE_ADVANCED );
     m_netNameRegex.Compile( "^NetName\\s*[!=]=\\s*$", wxRE_ADVANCED );
@@ -228,8 +251,8 @@ bool PANEL_DRC_RULE_EDITOR::TransferDataToWindow()
 {
     if( m_constraintData )
     {
-        m_nameCtrl->SetValue( m_constraintData->GetRuleName() );
-        m_commentCtrl->SetValue( m_constraintData->GetComment() );
+        m_nameCtrl->ChangeValue( m_constraintData->GetRuleName() );
+        m_commentCtrl->ChangeValue( m_constraintData->GetComment() );
         setSelectedLayers( m_constraintData->GetLayers(), m_constraintData->GetLayerSource() );
         wxString cond = m_constraintData->GetRuleCondition();
 
@@ -351,11 +374,20 @@ PANEL_DRC_RULE_EDITOR::getConstraintPanel( wxWindow* aParent, const DRC_RULE_EDI
                 aParent,
                 dynamic_pointer_cast<DRC_RE_ALLOWED_ORIENTATION_CONSTRAINT_DATA>( m_constraintData ).get() );
 
+    case VIAS_UNDER_SMD:
+        return new DRC_RE_VIAS_UNDER_SMD_OVERLAY_PANEL(
+                aParent, dynamic_pointer_cast<DRC_RE_VIAS_UNDER_SMD_CONSTRAINT_DATA>( m_constraintData ).get() );
+
     case CUSTOM_RULE:
         return new DRC_RE_CUSTOM_RULE_PANEL(
                 aParent, dynamic_pointer_cast<DRC_RE_CUSTOM_RULE_CONSTRAINT_DATA>( m_constraintData ) );
 
     case MATCHED_LENGTH_DIFF_PAIR:
+        return new DRC_RE_MATCHED_LENGTH_DIFF_PAIR_OVERLAY_PANEL(
+                aParent,
+                dynamic_pointer_cast<DRC_RE_MATCHED_LENGTH_DIFF_PAIR_CONSTRAINT_DATA>( m_constraintData ).get(),
+                units );
+
     case ABSOLUTE_LENGTH:
         return new DRC_RE_ABS_LENGTH_TWO_OVERLAY_PANEL(
                 aParent,

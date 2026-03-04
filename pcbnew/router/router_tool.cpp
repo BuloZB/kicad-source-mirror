@@ -41,6 +41,7 @@ using namespace std::placeholders;
 #include <pad.h>
 #include <zone.h>
 #include <pcb_edit_frame.h>
+#include <pcb_track.h>
 #include <pcbnew_id.h>
 #include <dialogs/dialog_pns_settings.h>
 #include <dialogs/dialog_pns_diff_pair_dimensions.h>
@@ -88,6 +89,31 @@ using namespace std::placeholders;
 #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
 
 using namespace KIGFX;
+
+namespace
+{
+
+// Saves and restores the global wxUpdateUIEvent interval so it cannot leak on
+// early returns or exceptions.
+class UI_UPDATE_INTERVAL_GUARD
+{
+public:
+    UI_UPDATE_INTERVAL_GUARD( long aNewInterval ) :
+            m_saved( wxUpdateUIEvent::GetUpdateInterval() )
+    {
+        wxUpdateUIEvent::SetUpdateInterval( aNewInterval );
+    }
+
+    ~UI_UPDATE_INTERVAL_GUARD()
+    {
+        wxUpdateUIEvent::SetUpdateInterval( m_saved );
+    }
+
+private:
+    long m_saved;
+};
+
+} // anonymous namespace
 
 /**
  * Flags used by via tool actions
@@ -1463,6 +1489,10 @@ void ROUTER_TOOL::performRouting( VECTOR2D aStartPosition )
         handleLayerSwitch( ACT_PlaceThroughVia.MakeEvent(), true );
     }
 
+    // Throttle wxEVT_UPDATE_UI during routing. The idle sweep fires between every Wait()
+    // iteration and its cost dominates at interactive frame rates.
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
+
     while( TOOL_EVENT* evt = Wait() )
     {
         setCursor();
@@ -2069,6 +2099,8 @@ void ROUTER_TOOL::performDragging( int aMode )
     m_gridHelper->SetAuxAxes( true, m_startSnapPoint );
     frame()->UndoRedoBlock( true );
 
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
+
     while( TOOL_EVENT* evt = Wait() )
     {
         ctls->ForceCursorPosition( false );
@@ -2539,6 +2571,8 @@ int ROUTER_TOOL::InlineDrag( const TOOL_EVENT& aEvent )
 
     // Send an initial movement to prime the collision detection
     m_router->Move( p, nullptr );
+
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
 
     bool hasMouseMoved = false;
     bool hasMultidragCancelled = false;

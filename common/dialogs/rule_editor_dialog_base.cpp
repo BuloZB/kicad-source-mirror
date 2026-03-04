@@ -488,6 +488,19 @@ void RULE_EDITOR_DIALOG_BASE::SetModified()
 
     if( m_cancelRuleButton && m_ruleTreeCtrl->IsEnabled() )
         m_cancelRuleButton->SetLabelText( _( "Discard" ) );
+
+    if( m_selectedData )
+    {
+        wxTreeItemId itemId = m_selectedData->GetTreeItemId();
+        if( itemId.IsOk() )
+        {
+            wxString currentText = m_ruleTreeCtrl->GetItemText( itemId );
+            if( !currentText.EndsWith( wxS( " *" ) ) )
+            {
+                m_ruleTreeCtrl->SetItemText( itemId, currentText + wxS( " *" ) );
+            }
+        }
+    }
 }
 
 
@@ -505,6 +518,9 @@ void RULE_EDITOR_DIALOG_BASE::ClearModified()
 
 void RULE_EDITOR_DIALOG_BASE::DeleteRuleTreeItem( wxTreeItemId aItemId, const int& aNodeId )
 {
+    if( m_selectedData && m_selectedData->GetNodeId() == aNodeId )
+        m_selectedData = nullptr;
+
     m_ruleTreeCtrl->Delete( aItemId );
     m_treeHistoryData.erase( aNodeId );
 }

@@ -19,13 +19,16 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "pns_arc.h"
-
 #include "pns_dragger.h"
+
+#include <core/typeinfo.h>
+
+#include "pns_arc.h"
 #include "pns_shove.h"
 #include "pns_router.h"
 #include "pns_debug_decorator.h"
 #include "pns_walkaround.h"
+
 
 namespace PNS {
 
@@ -615,8 +618,15 @@ bool DRAGGER::dragShove( const VECTOR2I& aP )
         if( preShoveNode )
             preShoveNode->Remove( draggedPreShove );
 
+        int policy = SHOVE::SHP_SHOVE | SHOVE::SHP_DONT_LOCK_ENDPOINTS;
+
+        PNS_DBG( Dbg(), Message, wxString::Format( "drag seg index %d", m_draggedSegmentIndex ) );
+
+        if( m_mode == DM_CORNER && m_draggedSegmentIndex == 0 )
+            policy |= SHOVE::SHP_REVERSED;
+
         m_shove->ClearHeads();
-        m_shove->AddHeads( draggedPreShove, SHOVE::SHP_SHOVE | SHOVE::SHP_DONT_LOCK_ENDPOINTS );
+        m_shove->AddHeads( draggedPreShove, policy );
         ok = m_shove->Run() == SHOVE::SH_OK;
 
         LINE draggedPostShove( draggedPreShove );

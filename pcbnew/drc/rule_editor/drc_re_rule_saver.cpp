@@ -118,7 +118,7 @@ wxString DRC_RULE_SAVER::generateRuleText( const DRC_RE_LOADED_PANEL_ENTRY& aEnt
 
     wxString ruleText = aEntry.constraintData->GetGeneratedRule();
 
-    if( ruleText.IsEmpty() )
+    if( ruleText.IsEmpty() || aEntry.panelType == SILK_TO_SOLDERMASK_CLEARANCE )
     {
         RULE_GENERATION_CONTEXT ctx;
         ctx.ruleName = aEntry.ruleName;
@@ -126,9 +126,33 @@ wxString DRC_RULE_SAVER::generateRuleText( const DRC_RE_LOADED_PANEL_ENTRY& aEnt
         ctx.constraintCode = aEntry.constraintData->GetConstraintCode();
         ctx.comment = aEntry.constraintData->GetComment();
 
-        // Generate layer clause if layers are specified
-        if( aEntry.layerCondition.any() && aBoard )
+        if( aEntry.panelType == SILK_TO_SOLDERMASK_CLEARANCE )
+        {
+            wxString silkCond;
+
+            if( aEntry.layerCondition.test( F_SilkS ) && !aEntry.layerCondition.test( B_SilkS ) )
+            {
+                silkCond = wxS( "A.Layer == 'F.SilkS' && B.Layer == 'F.Mask'" );
+            }
+            else if( aEntry.layerCondition.test( B_SilkS ) && !aEntry.layerCondition.test( F_SilkS ) )
+            {
+                silkCond = wxS( "A.Layer == 'B.SilkS' && B.Layer == 'B.Mask'" );
+            }
+            else
+            {
+                silkCond = wxS( "(A.Layer == 'F.SilkS' && B.Layer == 'F.Mask') || (A.Layer == 'B.SilkS' && B.Layer == "
+                                "'B.Mask')" );
+            }
+
+            if( !ctx.conditionExpression.IsEmpty() )
+                ctx.conditionExpression = silkCond + wxS( " && " ) + ctx.conditionExpression;
+            else
+                ctx.conditionExpression = silkCond;
+        }
+        else if( aBoard )
+        {
             ctx.layerClause = generateLayerClause( aEntry.layerCondition, aBoard );
+        }
 
         ruleText = aEntry.constraintData->GenerateRule( ctx );
     }

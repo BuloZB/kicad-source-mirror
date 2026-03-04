@@ -206,8 +206,11 @@ struct COND_GE_LT : public COND_FIELD_BASE<T>
 
 enum BOARD_UNITS
 {
-    IMPERIAL = 0x01,
-    METRIC = 0x03,
+    MILS = 0x01,
+    INCHES = 0x02,
+    MILLIMETERS = 0x03,
+    CENTIMETERS = 0x04,
+    MICROMETERS = 0x05,
 };
 
 
@@ -403,6 +406,7 @@ struct LAYER_INFO
         VIA_KEEPOUT          = 0x13,
         ANTI_ETCH            = 0x14,
         BOUNDARY             = 0x15,
+        CONSTRAINTS_REGION   = 0x16,
     };
 
     /**
@@ -432,6 +436,7 @@ struct LAYER_INFO
         BGEOM_TOOLING_CORNERS         = 0xFA,
         BGEOM_ASSEMBLY_NOTES          = 0xFB,
         BGEOM_PLATING_BAR             = 0xFC,
+        BGEOM_DESIGN_OUTLINE          = 0xFD,
 
         // COMPONENT_VALUE / DEVICE_TYPE / USER_PART_NUMBER
         // REF_DES / TOLERANCE
@@ -489,6 +494,17 @@ struct LAYER_INFO
         MFR_NO_GLOSS_TOP             = 0xFB,
         MFR_NO_GLOSS_ALL             = 0xFC,
         MFR_PHOTOPLOT_OUTLINE        = 0xFD,
+
+        // CONSTRAINTS_REGION
+        CREG_ALL                     = 0xFD,
+
+        // PACKAGE_KEEPIN / ROUTE_KEEPIN
+        KEEPIN_ALL                   = 0xFD,
+
+        // PACKAGE_KEEPOUT / ROUTE_KEEPOUT / VIA_KEEPOUT
+        KEEPOUT_BOTTOM               = 0xFB,
+        KEEPOUT_TOP                  = 0xFC,
+        KEEPOUT_ALL                  = 0xFD,
     };
 
     uint8_t m_Class;
@@ -712,6 +728,11 @@ struct BLK_0x08_PIN_NUMBER
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     uint32_t m_Ptr4;
+
+    uint32_t GetStrPtr() const
+    {
+        return m_StrPtr.value_or( m_StrPtr16x.value_or( 0 ) );
+    }
 };
 
 
@@ -764,6 +785,23 @@ struct BLK_0x0A_DRC
  */
 struct BLK_0x0C_PIN_DEF
 {
+    enum MARKER_SHAPE
+    {
+        // These are in the same order as the pad shapes, at least for the 'simple' shapes
+        CIRCLE = 0x02,
+        OCTAGON = 0x03,
+        CROSS = 0x04,
+        SQUARE = 0x05,
+        RECTANGLE = 0x06,
+        DIAMOND = 0x07,
+        PENTAGON = 0x0a,
+        OBLONG_X = 0x0b,
+        OBLONG_Y = 0x0c,
+        HEXAGON_X = 0x0f,
+        HEXAGON_Y = 0x10,
+        TRIANGLE = 0x12,
+    };
+
     uint8_t    m_T;
     LAYER_INFO m_Layer;
     uint32_t m_Key;
@@ -788,6 +826,11 @@ struct BLK_0x0C_PIN_DEF
     std::array<uint32_t, 3> m_UnknownArray;
 
     COND_GE<FMT_VER::V_174, uint32_t> m_Unknown6;
+
+    uint32_t GetShape() const
+    {
+        return m_Shape16x.value_or( m_Shape.value_or( 0 ) );
+    }
 };
 
 
@@ -1475,7 +1518,7 @@ struct BLK_0x28_SHAPE
 
     uint32_t m_Ptr2;
     uint32_t m_Ptr3;
-    uint32_t m_Ptr4;
+    uint32_t m_FirstKeepoutPtr;
     uint32_t m_FirstSegmentPtr;
     uint32_t m_Unknown4;
     uint32_t m_Unknown5;
@@ -1591,8 +1634,36 @@ struct BLK_0x2B_FOOTPRINT_DEF
  */
 struct BLK_0x2C_TABLE
 {
+    /**
+     * The subtype of a table.
+     *
+     * Not all of these are clear, but these are the ones that have been observed so far.
+     */
+    enum SUBTYPE
+    {
+        SUBTYPE_UNKNOWN = 0,
+
+        SUBTYPE_0x05 = 0x05,
+
+        SUBTYPE_0x06 = 0x06,
+        SUBTYPE_0x0c = 0x0c,
+        SUBTYPE_0x15 = 0x15,
+        SUBTYPE_0x16 = 0x16,
+        SUBTYPE_0x20 = 0x20,
+        SUBTYPE_0x23 = 0x23,
+
+        /// Some kind of net match group
+        SUBTYPE_0x102 = 0x102,
+        /// Diff pair
+        SUBTYPE_0x103 = 0x103,
+        SUBTYPE_0x107 = 0x107,
+
+        /// Used for drill charts and x-section charts
+        SUBTYPE_GRAPHICAL_GROUP = 0x110,
+    };
+
     uint8_t  m_Type;
-    uint16_t m_T2;
+    uint16_t m_SubType;
     uint32_t m_Key;
     uint32_t m_Next;
 
@@ -1656,6 +1727,11 @@ struct BLK_0x2D_FOOTPRINT_INST
     uint32_t m_AreasPtr;
     uint32_t m_UnknownPtr1;
     uint32_t m_UnknownPtr2;
+
+    uint32_t GetInstRef() const
+    {
+        return m_InstRef.value_or( m_InstRef16x.value_or( 0 ) );
+    }
 };
 
 
@@ -1876,7 +1952,7 @@ struct BLK_0x34_KEEPOUT
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     uint32_t m_Flags;
-    uint32_t m_Ptr2;
+    uint32_t m_FirstSegmentPtr;
     uint32_t m_Ptr3;
     uint32_t m_Unknown2;
 };
@@ -2006,15 +2082,15 @@ struct BLK_0x37_PTR_ARRAY
     uint8_t  m_T;
     uint16_t m_T2;
     uint32_t m_Key;
-    uint32_t m_Ptr1;
-    uint32_t m_Unknown1;
+    uint32_t m_GroupPtr;
+    uint32_t m_Next;
     uint32_t m_Capacity;
     uint32_t m_Count;
     uint32_t m_Unknown2;
 
-    std::array<uint32_t, 100> m_Ptrs;
+    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown3;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_UnknownArr;
+    std::array<uint32_t, 100> m_Ptrs;
 };
 
 

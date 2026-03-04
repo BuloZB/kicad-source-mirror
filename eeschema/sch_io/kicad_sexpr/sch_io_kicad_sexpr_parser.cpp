@@ -2926,7 +2926,13 @@ void SCH_IO_KICAD_SEXPR_PARSER::ParseSchematic( SCH_SHEET* aSheet, bool aIsCopya
             // when the item has only 2 corners, similar to a SCH_LINE
             SCH_SHAPE* poly = parseSchPolyLine();
 
-            if( poly->GetPointCount() > 2 )
+            if( poly->GetPointCount() < 2 )
+            {
+                delete poly;
+                THROW_PARSE_ERROR( _( "Schematic polyline has too few points" ), CurSource(), CurLine(),
+                                   CurLineNumber(), CurOffset() );
+            }
+            else if( poly->GetPointCount() > 2 )
             {
                 screen->Append( poly );
             }
@@ -3942,6 +3948,16 @@ SCH_SHEET* SCH_IO_KICAD_SEXPR_PARSER::parseSheet()
     }
 
     sheet->SetFields( fields );
+
+    if( !sheet->GetField( FIELD_T::SHEET_NAME ) )
+    {
+        THROW_PARSE_ERROR( _( "Missing sheet name property" ), CurSource(), CurLine(), CurLineNumber(), CurOffset() );
+    }
+
+    if( !sheet->GetField( FIELD_T::SHEET_FILENAME ) )
+    {
+        THROW_PARSE_ERROR( _( "Missing sheet file property" ), CurSource(), CurLine(), CurLineNumber(), CurOffset() );
+    }
 
     return sheet.release();
 }
@@ -5029,6 +5045,12 @@ SCH_TABLE* SCH_IO_KICAD_SEXPR_PARSER::parseSchTable()
         default:
             Expecting( "columns, col_widths, row_heights, border, separators, uuid, header or cells" );
         }
+    }
+
+    if( !table->GetCell( 0, 0 ) )
+    {
+        THROW_PARSE_ERROR( _( "Invalid table: no cells defined" ), CurSource(), CurLine(), CurLineNumber(),
+                           CurOffset() );
     }
 
     return table.release();

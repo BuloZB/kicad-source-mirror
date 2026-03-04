@@ -44,6 +44,7 @@
 #include <footprint_library_adapter.h>
 #include <eda_3d_viewer_frame.h>
 #include <project_pcb.h>
+#include <pcb_track.h>
 
 #include <base_units.h>
 #include <core/profile.h>        // To use GetRunningMicroSecs or another profiling utility
@@ -1931,10 +1932,6 @@ void RENDER_3D_RAYTRACE_BASE::load3DModels( CONTAINER_3D& aDstContainer,
         if( !fp->Models().empty()
           && m_boardAdapter.IsFootprintShown( fp ) )
         {
-            // Skip 3D models for footprints that are DNP in the current variant
-            if( fp->GetDNPForVariant( currentVariant ) )
-                continue;
-
             double zpos = m_boardAdapter.GetFootprintZPos( fp->IsFlipped() );
 
             VECTOR2I pos = fp->GetPosition();

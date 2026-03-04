@@ -20,6 +20,12 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <wx/log.h>
+#include <wx/filename.h>
+#include <wx/filedlg.h>
+#include <wx/socket.h>
+#include <wx/wupdlock.h>
+
 #include <advanced_config.h>
 #include <connectivity/connectivity_data.h>
 #include <kiface_base.h>
@@ -53,10 +59,10 @@
 #include <gal/graphics_abstraction_layer.h>
 #include <pcb_target.h>
 #include <pcb_point.h>
+#include <pcb_track.h>
 #include <layer_pairs.h>
 #include <drawing_sheet/ds_proxy_view_item.h>
 #include <wildcards_and_files_ext.h>
-#include <wx/filename.h>
 #include <functional>
 #include <pcb_barcode.h>
 #include <pcb_painter.h>
@@ -108,8 +114,6 @@
 #include <autorouter/autoplace_tool.h>
 #include <python/scripting/pcb_scripting_tool.h>
 #include <netlist_reader/netlist_reader.h>
-#include <wx/socket.h>
-#include <wx/wupdlock.h>
 #include <dialog_drc.h>     // for DIALOG_DRC_WINDOW_NAME definition
 #include <ratsnest/ratsnest_view_item.h>
 #include <widgets/appearance_controls.h>
@@ -128,7 +132,6 @@
 #include <footprint_viewer_frame.h>
 #include <footprint_chooser_frame.h>
 #include <toolbars_pcb_editor.h>
-#include <wx/log.h>
 #include <drc/rule_editor/dialog_drc_rule_editor.h>
 
 #ifdef KICAD_IPC_API
@@ -143,8 +146,6 @@
 #include <richio.h>
 
 #include "../scripting/python_scripting.h"
-
-#include <wx/filedlg.h>
 
 using namespace std::placeholders;
 
@@ -753,9 +754,9 @@ PCB_EDIT_FRAME::~PCB_EDIT_FRAME()
     }
 
     // Close modeless dialogs
-    wxWindow* drcDlg = wxWindow::FindWindowByName( DIALOG_DRC_WINDOW_NAME );                                              
-                  
-    if( drcDlg )                                                                                                          
+    wxWindow* drcDlg = wxWindow::FindWindowByName( DIALOG_DRC_WINDOW_NAME );
+
+    if( drcDlg )
         drcDlg->Close( true );
 
     wxWindow* ruleEditorDlg = wxWindow::FindWindowByName( DIALOG_DRC_RULE_EDITOR_WINDOW_NAME );
@@ -1105,20 +1106,33 @@ void PCB_EDIT_FRAME::setupUIConditions()
     auto globalRatsnestCond =
             [this] (const SELECTION& )
             {
-                return GetPcbNewSettings()->m_Display.m_ShowGlobalRatsnest;
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_Display.m_ShowGlobalRatsnest;
             };
 
     auto curvedRatsnestCond =
             [this] (const SELECTION& )
             {
-                return GetPcbNewSettings()->m_Display.m_DisplayRatsnestLinesCurved;
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_Display.m_DisplayRatsnestLinesCurved;
             };
 
     auto netHighlightCond =
             [this]( const SELECTION& )
             {
-                KIGFX::RENDER_SETTINGS* settings = GetCanvas()->GetView()->GetPainter()->GetSettings();
-                return !settings->GetHighlightNetCodes().empty();
+                if( auto* canvas = GetCanvas() )
+                {
+                    if( auto* view = canvas->GetView() )
+                    {
+                        if( auto* painter = view->GetPainter() )
+                        {
+                            if( auto* settings = painter->GetSettings() )
+                                return !settings->GetHighlightNetCodes().empty();
+                        }
+                    }
+                }
+
+                return false;
             };
 
     auto enableNetHighlightCond =
@@ -1146,19 +1160,22 @@ void PCB_EDIT_FRAME::setupUIConditions()
     const auto isArcKeepCenterMode =
             [this]( const SELECTION& )
             {
-                return GetPcbNewSettings()->m_ArcEditMode == ARC_EDIT_MODE::KEEP_CENTER_ADJUST_ANGLE_RADIUS;
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_ArcEditMode == ARC_EDIT_MODE::KEEP_CENTER_ADJUST_ANGLE_RADIUS;
             };
 
     const auto isArcKeepEndpointMode =
             [this]( const SELECTION& )
             {
-                return GetPcbNewSettings()->m_ArcEditMode == ARC_EDIT_MODE::KEEP_ENDPOINTS_OR_START_DIRECTION;
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_ArcEditMode == ARC_EDIT_MODE::KEEP_ENDPOINTS_OR_START_DIRECTION;
             };
 
     const auto isArcKeepRadiusMode =
             [this]( const SELECTION& )
             {
-                return GetPcbNewSettings()->m_ArcEditMode == ARC_EDIT_MODE::KEEP_CENTER_ENDS_ADJUST_ANGLE;
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_ArcEditMode == ARC_EDIT_MODE::KEEP_CENTER_ENDS_ADJUST_ANGLE;
             };
 
     mgr->SetConditions( ACTIONS::pointEditorArcKeepCenter,   CHECK( isArcKeepCenterMode ) );
@@ -1450,9 +1467,9 @@ void PCB_EDIT_FRAME::doCloseWindow()
     Unbind( EDA_EVT_CLOSE_DIALOG_BOOK_REPORTER, &PCB_EDIT_FRAME::onCloseModelessBookReporterDialogs,
             this );
 
-    wxWindow* drcDlg = wxWindow::FindWindowByName( DIALOG_DRC_WINDOW_NAME );                                              
-                  
-    if( drcDlg )                                                                                                          
+    wxWindow* drcDlg = wxWindow::FindWindowByName( DIALOG_DRC_WINDOW_NAME );
+
+    if( drcDlg )
         drcDlg->Close( true );
 
     wxWindow* ruleEditorDlg = wxWindow::FindWindowByName( DIALOG_DRC_RULE_EDITOR_WINDOW_NAME );
@@ -2946,7 +2963,17 @@ void PCB_EDIT_FRAME::ExchangeFootprint( FOOTPRINT* aExisting, FOOTPRINT* aNew,
     }
     else
     {
-        aNew->Models() = aExisting->Models();  // Linked list of 3D models.
+        // Preserve model references and all embedded model data.
+        aNew->Models() = aExisting->Models();
+
+        for( const auto& [name, file] : aExisting->GetEmbeddedFiles()->EmbeddedFileMap() )
+        {
+            if( file->type != EMBEDDED_FILES::EMBEDDED_FILE::FILE_TYPE::MODEL )
+                continue;
+
+            aNew->GetEmbeddedFiles()->RemoveFile( name, true );
+            aNew->GetEmbeddedFiles()->AddFile( new EMBEDDED_FILES::EMBEDDED_FILE( *file ) );
+        }
     }
 
     // Updating other parameters

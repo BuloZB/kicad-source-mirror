@@ -121,6 +121,7 @@ set( BMAPS_SMALL
     pintype_openemit
     pintype_nic
     pintype_noconnect
+    small_bottom
     small_down
     small_edit
     small_folder
@@ -129,6 +130,7 @@ set( BMAPS_SMALL
     small_plus
     small_refresh
     small_sort_desc
+    small_top
     small_trash
     small_up
     small_warning
@@ -730,6 +732,7 @@ set( BMAPS_CONSTRAINTS
     hole-to-hole-distance
     length
     matched-length-diff-pair
+    matched-length-diff-pair-v2
     maximum-allowed-deviation
     maximum-via-count
     minimum-angular-ring

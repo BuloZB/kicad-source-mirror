@@ -740,6 +740,7 @@ void DRC_ENGINE::compileRules()
     }
 
     m_hasExplicitClearanceRules = false;
+    m_hasGeometryDependentRules = false;
     m_explicitConstraints.clear();
 
     for( auto& [constraintType, ruleList] : m_constraintMap )
@@ -752,6 +753,13 @@ void DRC_ENGINE::compileRules()
 
                 if( constraintType == CLEARANCE_CONSTRAINT )
                     m_hasExplicitClearanceRules = true;
+
+                if( !m_hasGeometryDependentRules
+                    && c->condition
+                    && c->condition->HasGeometryDependentFunctions() )
+                {
+                    m_hasGeometryDependentRules = true;
+                }
             }
         }
     }
@@ -2227,9 +2235,7 @@ bool DRC_ENGINE::ReportPhase( const wxString& aMessage )
         return true;
 
     m_progressReporter->AdvancePhase( aMessage );
-    bool retval = m_progressReporter->KeepRefreshing( false );
-    wxSafeYield( nullptr, true ); // Force an update for the message
-    return retval;
+    return m_progressReporter->KeepRefreshing( false );
 }
 
 

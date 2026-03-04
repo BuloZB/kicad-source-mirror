@@ -70,16 +70,11 @@ public:
         // Positions measured from constraint_via_style.png bitmap
         // Format: { xStart, xEnd, yTop, tabOrder }
         return {
-            { 155 + DRC_RE_OVERLAY_XO, 195 + DRC_RE_OVERLAY_XO, 10 + DRC_RE_OVERLAY_YO, 0, wxS( "mm" ),
-              LABEL_POSITION::RIGHT }, // [0] min_via_diameter
-            { 245 + DRC_RE_OVERLAY_XO, 285 + DRC_RE_OVERLAY_XO, 10 + DRC_RE_OVERLAY_YO, 1, wxS( "mm" ),
-              LABEL_POSITION::RIGHT }, // [1] max_via_diameter
-            { 195 + DRC_RE_OVERLAY_XO, 235 + DRC_RE_OVERLAY_XO, 190 + DRC_RE_OVERLAY_YO, 2, wxS( "mm" ),
-              LABEL_POSITION::RIGHT }, // [2] min_via_hole
-            { 285 + DRC_RE_OVERLAY_XO, 325 + DRC_RE_OVERLAY_XO, 190 + DRC_RE_OVERLAY_YO, 3, wxS( "mm" ),
-              LABEL_POSITION::RIGHT }, // [3] max_via_hole
-            { 420 + DRC_RE_OVERLAY_XO, 510 + DRC_RE_OVERLAY_XO, 110 + DRC_RE_OVERLAY_YO, 4, _( "Via type:" ),
-              LABEL_POSITION::LEFT }, // [4] via_type dropdown
+            { 155 + DRC_RE_OVERLAY_XO, 195 + DRC_RE_OVERLAY_XO, 10 + DRC_RE_OVERLAY_YO, 0, wxS( "mm" ), LABEL_POSITION::RIGHT }, // [0] min_via_diameter
+            { 245 + DRC_RE_OVERLAY_XO, 285 + DRC_RE_OVERLAY_XO, 10 + DRC_RE_OVERLAY_YO, 1, wxS( "mm" ), LABEL_POSITION::RIGHT }, // [1] max_via_diameter
+            { 195 + DRC_RE_OVERLAY_XO, 235 + DRC_RE_OVERLAY_XO, 190 + DRC_RE_OVERLAY_YO, 2, wxS( "mm" ), LABEL_POSITION::RIGHT }, // [2] min_via_hole
+            { 285 + DRC_RE_OVERLAY_XO, 325 + DRC_RE_OVERLAY_XO, 190 + DRC_RE_OVERLAY_YO, 3, wxS( "mm" ), LABEL_POSITION::RIGHT }, // [3] max_via_hole
+            { 420 + DRC_RE_OVERLAY_XO, 510 + DRC_RE_OVERLAY_XO, 110 + DRC_RE_OVERLAY_YO, 4, _( "Via type:" ), LABEL_POSITION::LEFT }, // [4] via_type dropdown
         };
     }
 
@@ -101,11 +96,14 @@ public:
         if( m_maxViaHoleSize <= 0 )
             result.AddError( _( "Maximum Via Hole Size must be greater than 0" ) );
 
-        if( m_minViaDiameter > m_maxViaDiameter )
-            result.AddError( _( "Minimum Via Diameter cannot be greater than Maximum Via Diameter" ) );
+        if( result.isValid )
+        {
+            if( m_minViaDiameter > m_maxViaDiameter )
+                result.AddError( _( "Minimum Via Diameter cannot be greater than Maximum Via Diameter" ) );
 
-        if( m_minViaHoleSize > m_maxViaHoleSize )
-            result.AddError( _( "Minimum Via Hole Size cannot be greater than Maximum Via Hole Size" ) );
+            if( m_minViaHoleSize > m_maxViaHoleSize )
+                result.AddError( _( "Minimum Via Hole Size cannot be greater than Maximum Via Hole Size" ) );
+        }
 
         return result;
     }

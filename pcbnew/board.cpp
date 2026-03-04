@@ -85,7 +85,7 @@ VECTOR2I BOARD_ITEM::ZeroOffset( 0, 0 );
 
 
 BOARD::BOARD() :
-        BOARD_ITEM_CONTAINER( (BOARD_ITEM*) nullptr, PCB_T ),
+        BOARD_ITEM_CONTAINER( nullptr, PCB_T ),
         m_LegacyDesignSettingsLoaded( false ),
         m_LegacyCopperEdgeClearanceLoaded( false ),
         m_LegacyNetclassesLoaded( false ),
@@ -2113,10 +2113,13 @@ unsigned BOARD::GetNodesCount( int aNet ) const
 }
 
 
-BOX2I BOARD::ComputeBoundingBox( bool aBoardEdgesOnly ) const
+BOX2I BOARD::ComputeBoundingBox( bool aBoardEdgesOnly, bool aPhysicalLayersOnly ) const
 {
     BOX2I bbox;
     LSET  visible = GetVisibleLayers();
+
+    if( aPhysicalLayersOnly )
+        visible &= LSET::PhysicalLayersMask();
 
     // If the board is just showing a footprint, we want all footprint layers included in the
     // bounding box

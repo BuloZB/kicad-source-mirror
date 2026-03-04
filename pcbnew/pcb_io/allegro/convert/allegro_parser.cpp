@@ -25,7 +25,6 @@
 #include "convert/allegro_parser.h"
 
 #include <array>
-#include <chrono>
 #include <cstring>
 
 #include <wx/sstream.h>
@@ -33,6 +32,7 @@
 #include <wx/translation.h>
 
 #include <core/profile.h>
+#include <core/throttle.h>
 #include <core/type_helpers.h>
 #include <ki_exception.h>
 
@@ -277,9 +277,16 @@ std::unique_ptr<ALLEGRO::FILE_HEADER> HEADER_PARSER::ParseHeader()
 
         switch( units )
         {
-        case BOARD_UNITS::IMPERIAL:
-        case BOARD_UNITS::METRIC: header->m_BoardUnits = static_cast<BOARD_UNITS>( units ); break;
-        default: THROW_IO_ERROR( wxString::Format( "Unknown board units %d", units ) );
+        case BOARD_UNITS::MILS:
+        case BOARD_UNITS::INCHES:
+        case BOARD_UNITS::MILLIMETERS:
+        case BOARD_UNITS::CENTIMETERS:
+        case BOARD_UNITS::MICROMETERS:
+            header->m_BoardUnits = static_cast<BOARD_UNITS>( units );
+            break;
+
+        default:
+            THROW_IO_ERROR( wxString::Format( "Unknown board units %d", units ) );
         }
 
         m_stream.Skip( 3 );
@@ -1399,7 +1406,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x28_SHAPE( FILE_STREAM& aStream, 
 
     data.m_Ptr2 = aStream.ReadU32();
     data.m_Ptr3 = aStream.ReadU32();
-    data.m_Ptr4 = aStream.ReadU32();
+    data.m_FirstKeepoutPtr = aStream.ReadU32();
     data.m_FirstSegmentPtr = aStream.ReadU32();
     data.m_Unknown4 = aStream.ReadU32();
     data.m_Unknown5 = aStream.ReadU32();
@@ -1532,7 +1539,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x2C_TABLE( FILE_STREAM& aStream, 
     auto& data = block->GetData();
 
     data.m_Type = aStream.ReadU8();
-    data.m_T2 = aStream.ReadU16();
+    data.m_SubType = aStream.ReadU16();
     data.m_Key = aStream.ReadU32();
     data.m_Next = aStream.ReadU32();
 
@@ -1849,7 +1856,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x34_KEEPOUT( FILE_STREAM& aStream
     ReadCond( aStream, aVer, data.m_Unknown1 );
 
     data.m_Flags = aStream.ReadU32();
-    data.m_Ptr2 = aStream.ReadU32();
+    data.m_FirstSegmentPtr = aStream.ReadU32();
     data.m_Ptr3 = aStream.ReadU32();
     data.m_Unknown2 = aStream.ReadU32();
 
@@ -2023,15 +2030,15 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x37( FILE_STREAM& aStream, FMT_VE
     data.m_T = aStream.ReadU8();
     data.m_T2 = aStream.ReadU16();
     data.m_Key = aStream.ReadU32();
-    data.m_Ptr1 = aStream.ReadU32();
-    data.m_Unknown1 = aStream.ReadU32();
+    data.m_GroupPtr = aStream.ReadU32();
+    data.m_Next = aStream.ReadU32();
     data.m_Capacity = aStream.ReadU32();
     data.m_Count = aStream.ReadU32();
     data.m_Unknown2 = aStream.ReadU32();
 
-    ReadArrayU32( aStream, data.m_Ptrs );
+    ReadCond( aStream, aVer, data.m_Unknown3 );
 
-    ReadCond( aStream, aVer, data.m_UnknownArr );
+    ReadArrayU32( aStream, data.m_Ptrs );
 
     return block;
 }
@@ -2468,7 +2475,7 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
 
     BLOCK_PARSER blockParser( m_stream, ver, aBoard.m_Header->Get_0x27_End() );
 
-    auto lastRefresh = std::chrono::steady_clock::now();
+    THROTTLE refreshThrottle( std::chrono::milliseconds( 100 ) );
 
     while( true )
     {
@@ -2570,16 +2577,8 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
             {
                 m_progressReporter->AdvanceProgress();
 
-                if( ( aBoard.GetObjectCount() & 0x3F ) == 0 )
-                {
-                    auto now = std::chrono::steady_clock::now();
-
-                    if( now - lastRefresh >= std::chrono::milliseconds( 100 ) )
-                    {
-                        m_progressReporter->KeepRefreshing();
-                        lastRefresh = now;
-                    }
-                }
+                if( ( aBoard.GetObjectCount() & 0x3F ) == 0 && refreshThrottle.Ready() )
+                    m_progressReporter->KeepRefreshing();
             }
         }
     }

@@ -79,7 +79,16 @@ DRC_RE_CUSTOM_RULE_PANEL::~DRC_RE_CUSTOM_RULE_PANEL()
 bool DRC_RE_CUSTOM_RULE_PANEL::TransferDataToWindow()
 {
     if( m_constraintData )
-        m_textCtrl->SetValue( m_constraintData->GetRuleText() );
+    {
+        wxString text = m_constraintData->GetRuleText();
+
+        if( text.IsEmpty() )
+        {
+            text = wxS( "   (constraint clearance (min 0.2mm))" );
+        }
+
+        m_textCtrl->SetValue( text );
+    }
 
     return true;
 }
@@ -104,15 +113,45 @@ bool DRC_RE_CUSTOM_RULE_PANEL::ValidateInputs( int* aErrorCount, wxString* aVali
 
 wxString DRC_RE_CUSTOM_RULE_PANEL::GenerateRule( const RULE_GENERATION_CONTEXT& aContext )
 {
-    (void) aContext;
-
-    if( m_constraintData )
-        return m_constraintData->GetRuleText();
+    wxString body;
 
     if( m_textCtrl )
-        return m_textCtrl->GetValue();
+        body = m_textCtrl->GetValue();
+    else if( m_constraintData )
+        body = m_constraintData->GetRuleText();
 
-    return wxEmptyString;
+    if( body.Trim().IsEmpty() )
+        return wxEmptyString;
+
+    wxString ruleName = aContext.ruleName;
+    ruleName.Replace( wxS( "\"" ), wxS( "\\\"" ) );
+
+    wxString rule;
+    rule << wxS( "(rule \"" ) << ruleName << wxS( "\"\n" );
+
+    if( !aContext.comment.IsEmpty() )
+    {
+        wxArrayString lines = wxSplit( aContext.comment, '\n', '\0' );
+
+        for( const wxString& line : lines )
+        {
+            if( line.IsEmpty() )
+                continue;
+
+            rule << wxS( "\t# " ) << line << wxS( "\n" );
+        }
+    }
+
+    rule << body << wxS( ")" );
+
+    return rule;
+}
+
+
+void DRC_RE_CUSTOM_RULE_PANEL::UpdateRuleName( const wxString& aName )
+{
+    if( m_constraintData )
+        m_constraintData->SetRuleName( aName );
 }
 
 
@@ -202,8 +241,7 @@ void DRC_RE_CUSTOM_RULE_PANEL::onScintillaCharAdded( wxStyledTextEvent& aEvent )
     {
         if( sexprs.empty() )
         {
-            // Top level - suggest (rule or (version
-            tokens = wxT( "rule|version" );
+            tokens = wxT( "condition|constraint|layer|severity" );
         }
         else if( sexprs.top() == wxT( "rule" ) )
         {
@@ -278,9 +316,12 @@ void DRC_RE_CUSTOM_RULE_PANEL::onCheckSyntax( wxCommandEvent& aEvent )
         m_tipWindow = nullptr;
     }
 
-    wxString rulesText = m_textCtrl->GetText();
+    wxString body = m_textCtrl->GetText();
+    wxString ruleName = m_constraintData ? m_constraintData->GetRuleName() : wxString( wxS( "test" ) );
+    ruleName.Replace( wxS( "\"" ), wxS( "\\\"" ) );
+    wxString rulesText = wxString::Format( wxS( "(version 1)\n(rule \"%s\"\n%s)" ), ruleName, body );
 
-    if( rulesText.Trim().IsEmpty() )
+    if( body.Trim().IsEmpty() )
     {
 #if wxCHECK_VERSION( 3, 3, 2 )
         m_tipWindow = wxTipWindow::New( this, _( "No rule text to check." ) );
