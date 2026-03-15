@@ -231,6 +231,8 @@ public:
 
     static wxString DefaultGlobalTablePath( LIBRARY_TABLE_TYPE aType );
 
+    static wxString StockTablePath( LIBRARY_TABLE_TYPE aType );
+
     static bool IsTableValid( const wxString& aPath );
 
     /// @return true if all required global tables are present on disk and valid
@@ -348,6 +350,7 @@ private:
     typedef std::tuple<LIBRARY_TABLE_TYPE, LIBRARY_TABLE_SCOPE, wxString> ROW_CACHE_KEY;
 
     std::map<ROW_CACHE_KEY, LIBRARY_TABLE_ROW*> m_rowCache;
+    mutable std::mutex                          m_rowCacheMutex;
 };
 
 #endif //LIBRARY_MANAGER_H

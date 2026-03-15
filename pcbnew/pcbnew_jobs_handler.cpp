@@ -36,6 +36,7 @@
 #include <drc/drc_report.h>
 #include <drawing_sheet/ds_data_model.h>
 #include <drawing_sheet/ds_proxy_view_item.h>
+#include <footprint.h>
 #include <jobs/job_fp_export_svg.h>
 #include <jobs/job_fp_upgrade.h>
 #include <jobs/job_export_pcb_ipc2581.h>
@@ -58,6 +59,7 @@
 #include <jobs/job_pcb_import.h>
 #include <jobs/job_pcb_upgrade.h>
 #include <eda_units.h>
+#include <footprint_library_adapter.h>
 #include <lset.h>
 #include <cli/exit_codes.h>
 #include <exporters/place_file_exporter.h>
@@ -2287,6 +2289,11 @@ int PCBNEW_JOBS_HANDLER::JobExportDrc( JOB* aJob )
     if( !brd )
         return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
 
+    // Running DRC requires libraries be loaded, so make sure they have been
+    FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( brd->GetProject() );
+    adapter->AsyncLoad();
+    adapter->BlockUntilLoaded();
+
     if( drcJob->GetConfiguredOutputPath().IsEmpty() )
     {
         wxFileName fn = brd->GetFileName();
@@ -2536,6 +2543,20 @@ int PCBNEW_JOBS_HANDLER::JobExportIpc2581( JOB* aJob )
     props["mfg"] = job->m_colMfg;
     props["dist"] = job->m_colDist;
     props["distpn"] = job->m_colDistPn;
+
+    wxString bomRev = job->m_bomRev;
+
+    if( bomRev.IsEmpty() && brd->GetProject() )
+    {
+        const IP2581_BOM& bomSettings = brd->GetProject()->GetProjectFile().m_IP2581Bom;
+        bomRev = bomSettings.bomRev;
+
+        if( bomRev.IsEmpty() )
+            bomRev = bomSettings.schRevision;
+    }
+
+    if( !bomRev.IsEmpty() )
+        props["bomrev"] = bomRev;
 
     wxString tempFile = wxFileName::CreateTempFileName( wxS( "pcbnew_ipc" ) );
     try
@@ -2956,7 +2977,7 @@ int PCBNEW_JOBS_HANDLER::JobImport( JOB* aJob )
 
                 layerMappings[layerName.ToStdString()] = {
                     { "kicad_layer", LSET::Name( layer ).ToStdString() },
-                    { "method", job->m_autoMap ? "auto" : "manual" }
+                    { "method", "auto" }
                 };
             }
 

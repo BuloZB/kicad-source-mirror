@@ -114,6 +114,8 @@ void LIB_SYMBOL::cacheShownDescription()
         if( root.get() != this )
             shownText = root->GetDescriptionField().GetShownText( false, 0 );
     }
+
+    m_shownDescriptionCache = shownText;
 }
 
 
@@ -1081,6 +1083,8 @@ void LIB_SYMBOL::RemoveDrawItem( SCH_ITEM* aItem )
         if( &*i == aItem )
         {
             items.erase( i );
+            cachePinCount();
+            cacheChooserFields();
             break;
         }
     }

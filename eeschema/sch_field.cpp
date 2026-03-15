@@ -226,7 +226,9 @@ wxString SCH_FIELD::GetShownText( bool aAllowExtraText, int aDepth ) const
         return GetShownText( &currentSheet, aAllowExtraText, aDepth, variantName );
     }
     else
+    {
         return GetShownText( nullptr, aAllowExtraText, aDepth );
+    }
 }
 
 
@@ -1296,6 +1298,12 @@ void SCH_FIELD::Plot( PLOTTER* aPlotter, bool aBackground, const SCH_PLOT_OPTS& 
         hjustify = GR_TEXT_H_ALIGN_CENTER;
         vjustify = GR_TEXT_V_ALIGN_CENTER;
         textpos = GetBoundingBox().Centre();
+    }
+    else if( m_parent && m_parent->Type() == LIB_SYMBOL_T )
+    {
+        // Library-symbol exports (CLI/symbol editor) provide an item offset in the same coordinate
+        // frame as body graphics/pins.  Apply the same transform+offset pipeline to field text.
+        textpos = renderSettings->TransformCoordinate( textpos ) + aOffset;
     }
     else if( m_parent && m_parent->Type() == SCH_GLOBAL_LABEL_T )
     {

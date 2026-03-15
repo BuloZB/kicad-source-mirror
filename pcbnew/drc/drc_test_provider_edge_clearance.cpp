@@ -26,6 +26,7 @@
 #include <pcb_board_outline.h>
 #include <board_design_settings.h>
 #include <footprint.h>
+#include <pad.h>
 #include <pcb_track.h>
 #include <geometry/seg.h>
 #include <geometry/shape_segment.h>
@@ -33,7 +34,7 @@
 #include <drc/drc_item.h>
 #include <drc/drc_rule.h>
 #include <drc/drc_test_provider.h>
-#include "drc_rtree.h"
+#include <drc/drc_rtree.h>
 
 /*
     Board edge clearance test. Checks all items for their mechanical clearances against the board
@@ -281,15 +282,30 @@ bool DRC_TEST_PROVIDER_EDGE_CLEARANCE::Run()
                     // A single rectangle for the board would defeat the RTree, so convert to edges
                     if( shape->GetCornerRadius() > 0 )
                     {
-                        for( SHAPE* seg : shape->MakeEffectiveShapes( true ) )
+                        for( SHAPE* subshape : shape->MakeEffectiveShapes( true ) )
                         {
-                            wxCHECK2( dynamic_cast<SHAPE_SEGMENT*>( seg ), continue );
-
-                            edges.emplace_back( static_cast<PCB_SHAPE*>( shape->Clone() ) );
-                            edges.back()->SetShape( SHAPE_T::SEGMENT );
-                            edges.back()->SetStart( seg->GetStart() );
-                            edges.back()->SetEnd( seg->GetEnd() );
-                            edges.back()->SetStroke( stroke );
+                            if( SHAPE_SEGMENT* segment = dynamic_cast<SHAPE_SEGMENT*>( subshape ) )
+                            {
+                                edges.emplace_back( static_cast<PCB_SHAPE*>( shape->Clone() ) );
+                                edges.back()->SetShape( SHAPE_T::SEGMENT );
+                                edges.back()->SetStart( segment->GetStart() );
+                                edges.back()->SetEnd( segment->GetEnd() );
+                                edges.back()->SetStroke( stroke );
+                            }
+                            else if( SHAPE_ARC* arc = dynamic_cast<SHAPE_ARC*>( subshape ) )
+                            {
+                                edges.emplace_back( static_cast<PCB_SHAPE*>( shape->Clone() ) );
+                                edges.back()->SetShape( SHAPE_T::ARC );
+                                edges.back()->SetArcGeometry( arc->GetP0(), arc->GetArcMid(), arc->GetP1() );
+                                edges.back()->SetStroke( stroke );
+                            }
+                            else
+                            {
+                                wxFAIL_MSG(
+                                        wxString::Format( "Unexpected effective shape type %d for rounded rectangle",
+                                                          (int) subshape->Type() ) );
+                                continue;
+                            }
                         }
                     }
                     else

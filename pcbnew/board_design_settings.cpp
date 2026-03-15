@@ -209,6 +209,8 @@ BOARD_DESIGN_SETTINGS::BOARD_DESIGN_SETTINGS( JSON_SETTINGS* aParent, const std:
     m_DRCSeverities[DRCE_MISSING_TUNING_PROFILE] = RPT_SEVERITY_WARNING;
     m_DRCSeverities[DRCE_TUNING_PROFILE_IMPLICIT_RULES] = RPT_SEVERITY_IGNORE;
 
+    m_DRCSeverities[DRCE_TRACK_NOT_CENTERED_ON_VIA] = RPT_SEVERITY_IGNORE;
+
     m_MaxError = ARC_HIGH_DEF;
     m_ZoneKeepExternalFillets = false;
     m_UseHeightForLengthCalcs = true;
@@ -305,7 +307,7 @@ BOARD_DESIGN_SETTINGS::BOARD_DESIGN_SETTINGS( JSON_SETTINGS* aParent, const std:
 
     m_params.emplace_back( new PARAM_SCALED<int>( "rules.min_silk_clearance",
             &m_SilkClearance, pcbIUScale.mmToIU( DEFAULT_SILKCLEARANCE ),
-            pcbIUScale.mmToIU( 0.00 ), pcbIUScale.mmToIU( 100.0 ), pcbIUScale.MM_PER_IU ) );
+            pcbIUScale.mmToIU( -10.0 ), pcbIUScale.mmToIU( 100.0 ), pcbIUScale.MM_PER_IU ) );
 
     m_params.emplace_back( new PARAM_SCALED<int>( "rules.min_groove_width",
             &m_MinGrooveWidth, pcbIUScale.mmToIU( DEFAULT_MINGROOVEWIDTH ),

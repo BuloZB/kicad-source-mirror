@@ -37,6 +37,7 @@ set( QA_PCBNEW_SRCS
     test_array_pad_name_provider.cpp
     test_barcode_load_save.cpp
     test_board_connected_items.cpp
+    test_board_design_settings.cpp
     test_board_item.cpp
     test_board_commit.cpp
     test_board_statistics.cpp
@@ -47,6 +48,7 @@ set( QA_PCBNEW_SRCS
     test_graphics_load_save.cpp
     test_graphics_import_mgr.cpp
     test_group_load_save.cpp
+    test_footprint.cpp
     test_footprint_load_save.cpp
     test_fp_lib_load_save.cpp
     test_io_mgr.cpp
@@ -100,7 +102,10 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_unconnected_items_exclusion_loss.cpp
     drc/test_drc_via_dangling.cpp
     drc/test_drc_tuning_profiles.cpp
+    drc/test_drc_creepage.cpp
+    drc/test_drc_creepage_issue20480.cpp
     drc/test_drc_creepage_issue21482.cpp
+    drc/test_drc_creepage_issue23364.cpp
     drc/test_drc_physical_clearance.cpp
     drc/test_drc_rule_editor.cpp
     drc/test_drc_bitmap_overlay_panel.cpp

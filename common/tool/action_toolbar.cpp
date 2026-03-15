@@ -521,7 +521,6 @@ void ACTION_TOOLBAR::AddGroup( std::unique_ptr<ACTION_GROUP> aGroup )
     for( const auto& act : aGroup->GetActions() )
         isToggleEntry |= act->CheckToolbarState( TOOLBAR_STATE::TOGGLE );
 
-
     m_toolKinds[ groupId ]    = isToggleEntry;
     m_toolActions[ groupId ]  = defaultAction;
     m_actionGroups[ groupId ] = std::move( aGroup );
@@ -730,6 +729,7 @@ void ACTION_TOOLBAR::onToolEvent( wxAuiToolBarEvent& aEvent )
     {
         const auto actionIt = m_toolActions.find( id );
         const auto cancelIt = m_toolCancellable.find( id );
+        const auto groupIt  = m_actionGroups.find( id );
 
         // Determine if the tool is actually cancellable
         bool isCancellable = ( cancelIt != m_toolCancellable.end() ) ? cancelIt->second : false;
@@ -740,6 +740,40 @@ void ACTION_TOOLBAR::onToolEvent( wxAuiToolBarEvent& aEvent )
         {
             // Send a cancel event
             m_toolManager->CancelTool();
+            handled = true;
+        }
+        else if( groupIt != m_actionGroups.end()
+                 && std::none_of( groupIt->second->GetActions().begin(),
+                                  groupIt->second->GetActions().end(),
+                                  []( const TOOL_ACTION* a )
+                                  {
+                                      return a->IsActivation();
+                                  } ) )
+        {
+            // For non-tool toggle groups (units, crosshair, line modes), cycle to the next
+            // action on click. Tool groups (route track, etc.) fall through and just dispatch
+            // the currently displayed action.
+            ACTION_GROUP*                          group   = groupIt->second.get();
+            const std::vector<const TOOL_ACTION*>& actions = group->GetActions();
+            const TOOL_ACTION*                     current = actionIt->second;
+
+            const TOOL_ACTION* next = actions[0];
+
+            for( size_t i = 0; i < actions.size(); ++i )
+            {
+                if( actions[i]->GetId() == current->GetId() )
+                {
+                    next = actions[( i + 1 ) % actions.size()];
+                    break;
+                }
+            }
+
+            evt = next->MakeEvent();
+            evt->SetHasPosition( false );
+            m_toolManager->ProcessEvent( *evt );
+            m_toolManager->GetToolHolder()->RefreshCanvas();
+
+            doSelectAction( group, *next );
             handled = true;
         }
         else if( actionIt != m_toolActions.end() )
@@ -999,7 +1033,8 @@ void ACTION_TOOLBAR::popupPalette( wxAuiToolBarItem* aItem )
     }
 
     // Release the mouse to ensure the first click will be recognized in the palette
-    ReleaseMouse();
+    if( HasCapture() )
+        ReleaseMouse();
 
     m_palette->SetPosition( pos );
     m_palette->Popup();

@@ -732,6 +732,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0C( FILE_STREAM& aStream, FMT_VE
     ReadCond( aStream, aVer, data.m_Unknown_16x );
 
     data.m_Unknown4 = aStream.ReadU32();
+    ReadCond( aStream, aVer, data.m_Unknown5 );
 
     for( size_t i = 0; i < data.m_Coords.size(); ++i )
     {
@@ -743,12 +744,11 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0C( FILE_STREAM& aStream, FMT_VE
         data.m_Size[i] = aStream.ReadS32();
     }
 
-    for( size_t i = 0; i < data.m_UnknownArray.size(); ++i )
-    {
-        data.m_UnknownArray[i] = aStream.ReadU32();
-    }
+    data.m_GroupPtr = aStream.ReadU32();
+    data.m_Unknown6 = aStream.ReadU32();
+    data.m_Unknown7 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Unknown6 );
+    ReadCond( aStream, aVer, data.m_Unknown8 );
 
     return block;
 }
@@ -1037,7 +1037,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x1C_PADSTACK( FILE_STREAM& aStrea
     }
 
     data.m_B = aStream.ReadU8();
-    data.m_C = aStream.ReadU8();
+    data.m_Flags = aStream.ReadU8();
     data.m_D = aStream.ReadU8();
 
     ReadCond( aStream, aVer, data.m_Unknown7 );
@@ -1411,11 +1411,11 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x28_SHAPE( FILE_STREAM& aStream, 
     data.m_Unknown4 = aStream.ReadU32();
     data.m_Unknown5 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Ptr7 );
+    ReadCond( aStream, aVer, data.m_TablePtr );
 
     data.m_Ptr6 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Ptr7_16x );
+    ReadCond( aStream, aVer, data.m_TablePtr_16x );
 
     for( size_t i = 0; i < data.m_Coords.size(); ++i )
     {
@@ -1969,7 +1969,12 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             item.m_CharWidth = aStream.ReadU32();
 
             ReadCond( aStream, aVer, item.m_Unknown2 );
-            ReadArrayU32( aStream, item.m_Xs );
+
+            item.m_CharacterSpace = aStream.ReadU32();
+            item.m_LineSpace = aStream.ReadU32();
+            item.m_Unknown3 = aStream.ReadU32();
+            item.m_StrokeWidth = aStream.ReadU32();
+
             ReadCond( aStream, aVer, item.m_Ys );
 
             data.m_Items.emplace_back( std::move( item ) );
@@ -2549,7 +2554,7 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
             {
                 THROW_IO_ERROR( wxString::Format(
                         "Do not have parser for block index %zu type %#02x available at offset %#010zx",
-                        aBoard.GetObjectCount(), blockTypeByte, offset ) );
+                        aBoard.GetObjectCount() + 1, blockTypeByte, offset ) );
             }
             else
             {
@@ -2563,13 +2568,10 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
         }
         else
         {
-            if( wxLog::IsAllowedTraceMask( traceAllegroParser ) )
-            {
-                wxLogTrace( traceAllegroParserBlocks,
-                            wxString::Format( "Added block %zu, type %#04x from %#010zx to %#010zx",
-                                              aBoard.GetObjectCount(), block->GetBlockType(), offset,
-                                              m_stream.Position() ) );
-            }
+            wxLogTrace( traceAllegroParserBlocks,
+                        wxString::Format( "Added block %zu, type %#04x from %#010zx to %#010zx",
+                                          aBoard.GetObjectCount(), block->GetBlockType(), offset,
+                                          m_stream.Position() ) );
 
             aBoard.InsertBlock( std::move( block ) );
 

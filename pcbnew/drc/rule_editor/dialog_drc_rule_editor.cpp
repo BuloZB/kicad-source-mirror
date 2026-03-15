@@ -207,50 +207,37 @@ void DIALOG_DRC_RULE_EDITOR::LoadExistingRules()
     DRC_RULE_LOADER loader;
     std::vector<DRC_RE_LOADED_PANEL_ENTRY> entries = loader.LoadFile( rulesFile.GetFullPath() );
 
+    if( entries.empty() )
+        return;
+
     wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
                 wxS( "[LoadExistingRules] Loaded %zu entries from %s" ),
                 entries.size(), rulesFile.GetFullPath() );
 
-    // Debug: Log all constraint nodes available for parent lookup
-    wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
-                wxS( "[LoadExistingRules] Available constraint nodes in m_ruleTreeNodeDatas:" ) );
+    // Build lookup maps before the loading loop to avoid O(n) scans per rule.
+    // constraintTypeToNodeId maps panel type → parent node ID (from m_ruleTreeNodeDatas).
+    // m_treeHistoryData already maps node ID → wxTreeItemId (populated by InitRuleTreeItems).
+    std::unordered_map<int, int> constraintTypeToNodeId;
 
     for( const RULE_TREE_NODE& node : m_ruleTreeNodeDatas )
     {
-        if( node.m_nodeType == CONSTRAINT )
+        if( node.m_nodeType == CONSTRAINT && node.m_nodeTypeMap )
         {
+            constraintTypeToNodeId[*node.m_nodeTypeMap] = node.m_nodeId;
+
             wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
                         wxS( "[LoadExistingRules]   Node '%s': nodeId=%d, m_nodeTypeMap=%d" ),
                         wxString( node.m_nodeName ), node.m_nodeId,
-                        node.m_nodeTypeMap ? static_cast<int>( *node.m_nodeTypeMap ) : -1 );
+                        static_cast<int>( *node.m_nodeTypeMap ) );
         }
     }
 
-    // Helper to find tree item by node ID
-    std::function<wxTreeItemId( wxTreeItemId, int )> findItem =
-            [&]( wxTreeItemId aItem, int aTargetId ) -> wxTreeItemId
-    {
-        RULE_TREE_ITEM_DATA* data =
-                dynamic_cast<RULE_TREE_ITEM_DATA*>( m_ruleTreeCtrl->GetItemData( aItem ) );
-
-        if( data && data->GetNodeId() == aTargetId )
-            return aItem;
-
-        wxTreeItemIdValue cookie;
-        wxTreeItemId      child = m_ruleTreeCtrl->GetFirstChild( aItem, cookie );
-
-        while( child.IsOk() )
-        {
-            wxTreeItemId res = findItem( child, aTargetId );
-
-            if( res.IsOk() )
-                return res;
-
-            child = m_ruleTreeCtrl->GetNextChild( aItem, cookie );
-        }
-
-        return wxTreeItemId();
-    };
+    // Suppress selection-change events and repaint during bulk loading. Without this,
+    // each AppendNewRuleTreeItem triggers SelectItem which creates and immediately
+    // destroys a full PANEL_DRC_RULE_EDITOR (regex compilation, Scintilla, layout)
+    // for every rule. On Windows this causes >11s load times for moderate rule sets.
+    m_ruleTreeCtrl->Freeze();
+    m_suppressSelectionEvents = true;
 
     for( DRC_RE_LOADED_PANEL_ENTRY& entry : entries )
     {
@@ -260,19 +247,9 @@ void DIALOG_DRC_RULE_EDITOR::LoadExistingRules()
                     wxS( "[LoadExistingRules] Processing entry: rule='%s', panelType=%d" ),
                     entry.ruleName, static_cast<int>( type ) );
 
-        // Find parent node by constraint type
-        int parentId = -1;
+        auto typeIt = constraintTypeToNodeId.find( static_cast<int>( type ) );
 
-        for( const RULE_TREE_NODE& node : m_ruleTreeNodeDatas )
-        {
-            if( node.m_nodeType == CONSTRAINT && node.m_nodeTypeMap && *node.m_nodeTypeMap == type )
-            {
-                parentId = node.m_nodeId;
-                break;
-            }
-        }
-
-        if( parentId == -1 )
+        if( typeIt == constraintTypeToNodeId.end() )
         {
             wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
                         wxS( "[LoadExistingRules] No parent found for panelType=%d, skipping" ),
@@ -280,12 +257,24 @@ void DIALOG_DRC_RULE_EDITOR::LoadExistingRules()
             continue;
         }
 
-        wxTreeItemId parentItem = findItem( m_ruleTreeCtrl->GetRootItem(), parentId );
+        int parentId = typeIt->second;
+
+        auto histIt = m_treeHistoryData.find( parentId );
+
+        if( histIt == m_treeHistoryData.end() )
+        {
+            wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
+                        wxS( "[LoadExistingRules] Tree item not found for parentId=%d, skipping" ),
+                        parentId );
+            continue;
+        }
+
+        wxTreeItemId parentItem = std::get<2>( histIt->second );
 
         if( !parentItem.IsOk() )
         {
             wxLogTrace( wxS( "KI_TRACE_DRC_RULE_EDITOR" ),
-                        wxS( "[LoadExistingRules] Tree item not found for parentId=%d, skipping" ),
+                        wxS( "[LoadExistingRules] Tree item not valid for parentId=%d, skipping" ),
                         parentId );
             continue;
         }
@@ -296,7 +285,6 @@ void DIALOG_DRC_RULE_EDITOR::LoadExistingRules()
         RULE_TREE_NODE node =
                 buildRuleTreeNodeData( entry.ruleName, RULE, parentId, type );
 
-        // Transfer loaded entry data to the constraint data
         auto ruleData = std::dynamic_pointer_cast<DRC_RE_BASE_CONSTRAINT_DATA>( entry.constraintData );
 
         if( ruleData )
@@ -321,6 +309,9 @@ void DIALOG_DRC_RULE_EDITOR::LoadExistingRules()
                     wxS( "[LoadExistingRules] Appended rule '%s' to tree under parentId=%d" ),
                     entry.ruleName, parentId );
     }
+
+    m_suppressSelectionEvents = false;
+    m_ruleTreeCtrl->Thaw();
 }
 
 
@@ -378,6 +369,9 @@ void DIALOG_DRC_RULE_EDITOR::RuleTreeItemSelectionChanged( RULE_TREE_ITEM_DATA* 
 {
     RULE_TREE_NODE* nodeDetail = getRuleTreeNodeInfo( aCurrentRuleTreeItemData->GetNodeId() );
 
+    // Freeze so panel creation and data population happen off-screen.
+    m_scrolledContentWin->Freeze();
+
     if( nodeDetail->m_nodeType == ROOT || nodeDetail->m_nodeType == CATEGORY || nodeDetail->m_nodeType == CONSTRAINT )
     {
         std::vector<RULE_TREE_NODE*> ruleNodes;
@@ -410,7 +404,6 @@ void DIALOG_DRC_RULE_EDITOR::RuleTreeItemSelectionChanged( RULE_TREE_ITEM_DATA* 
                 &constraintName, dynamic_pointer_cast<DRC_RE_BASE_CONSTRAINT_DATA>( nodeDetail->m_nodeData ) );
 
         SetContentPanel( m_ruleEditorPanel );
-
         m_ruleEditorPanel->TransferDataToWindow();
 
         m_ruleEditorPanel->SetSaveCallback(
@@ -445,6 +438,8 @@ void DIALOG_DRC_RULE_EDITOR::RuleTreeItemSelectionChanged( RULE_TREE_ITEM_DATA* 
 
         m_groupHeaderPanel = nullptr;
     }
+
+    m_scrolledContentWin->Thaw();
 }
 
 
@@ -604,6 +599,8 @@ void DIALOG_DRC_RULE_EDITOR::RemoveRule( int aNodeId )
         SetModified();
         DeleteRuleTreeItem( GetCurrentlySelectedRuleTreeItemData()->GetTreeItemId(), nodeId );
         deleteTreeNodeData( nodeId );
+        SaveRulesToFile();
+        ClearModified();
     }
 
     SetControlsEnabled( true );
@@ -688,8 +685,8 @@ std::vector<RULE_TREE_NODE> DIALOG_DRC_RULE_EDITOR::buildManufacturabilityRuleTr
     result.push_back( buildRuleTreeNodeData( "Soldermask", DRC_RULE_EDITOR_ITEM_TYPE::CATEGORY, aParentId ) );
     lastParentId = m_nodeId;
 
-    result.push_back( buildRuleTreeNodeData( "Minimum soldermask silver", DRC_RULE_EDITOR_ITEM_TYPE::CONSTRAINT,
-                                             lastParentId, MINIMUM_SOLDERMASK_SILVER ) );
+    result.push_back( buildRuleTreeNodeData( "Minimum soldermask sliver", DRC_RULE_EDITOR_ITEM_TYPE::CONSTRAINT,
+                                             lastParentId, MINIMUM_SOLDERMASK_SLIVER ) );
     result.push_back( buildRuleTreeNodeData( "Soldermask expansion", DRC_RULE_EDITOR_ITEM_TYPE::CONSTRAINT,
                                              lastParentId, SOLDERMASK_EXPANSION ) );
 
@@ -1173,8 +1170,11 @@ bool DIALOG_DRC_RULE_EDITOR::validateAllRules( std::map<wxString, wxString>& aEr
 {
     bool allValid = true;
 
-    // Track rule names and their conditions to detect same-name different-condition conflicts
-    std::map<wxString, std::set<wxString>> ruleConditions;
+    // Track (ruleName, layerSource) pairs and their conditions to detect conflicts.
+    // Rules with the same name and same layer scope must share the same condition to be
+    // merged correctly. Rules with different layer scopes are saved as separate rules and
+    // are allowed to have different conditions.
+    std::map<std::pair<wxString, wxString>, std::set<wxString>> ruleConditions;
 
     for( RULE_TREE_NODE& node : m_ruleTreeNodeDatas )
     {
@@ -1207,21 +1207,21 @@ bool DIALOG_DRC_RULE_EDITOR::validateAllRules( std::map<wxString, wxString>& aEr
                 allValid = false;
             }
 
-            // Track conditions for same-name different-condition validation
             wxString ruleName = constraintData->GetRuleName();
             wxString condition = constraintData->GetRuleCondition();
-            ruleConditions[ruleName].insert( condition );
+            wxString layerSource = constraintData->GetLayerSource();
+            ruleConditions[std::make_pair( ruleName, layerSource )].insert( condition );
         }
     }
 
-    // Check for same-name different-condition conflicts
-    for( const auto& [ruleName, conditions] : ruleConditions )
+    // Check for same-name same-layer different-condition conflicts
+    for( const auto& [key, conditions] : ruleConditions )
     {
         if( conditions.size() > 1 )
         {
             wxString errorMsg = _( "Multiple rules with the same name have different conditions. "
                                    "Rules with the same name must have identical conditions to be merged." );
-            aErrors[ruleName] = errorMsg;
+            aErrors[key.first] = errorMsg;
             allValid = false;
         }
     }

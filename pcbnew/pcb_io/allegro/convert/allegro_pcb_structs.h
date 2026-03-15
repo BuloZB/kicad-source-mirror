@@ -417,6 +417,8 @@ struct LAYER_INFO
     enum SUBCLASS
     {
         // BOARD_GEOMETRY
+        // BGEOM_PASTEMASK_BOTTOM     = 0x??
+        // BGEOM_PASTEMASK_TOP        = 0x??
         BGEOM_OUTLINE                 = 0xEA,
         BGEOM_CONSTRAINT_AREA         = 0xEB,
         BGEOM_OFF_GRID_AREA           = 0xEC,
@@ -463,8 +465,10 @@ struct LAYER_INFO
         DFMT_OUTLINE                 = 0xFD,
 
         // PACKAGE_GEOMETRY
-        DFA_BOUND_BOTTOM             = 0xEE,
-        DFA_BOUND_TOP                = 0xEF,
+        PGEOM_PASTEMASK_BOTTOM       = 0xEC,
+        PGEOM_PASTEMASK_TOP          = 0xED,
+        PGEOM_DFA_BOUND_BOTTOM       = 0xEE,
+        PGEOM_DFA_BOUND_TOP          = 0xEF,
         PGEOM_DISPLAY_BOTTOM         = 0xF1,
         PGEOM_DISPLAY_TOP            = 0xF2,
         PGEOM_SOLDERMASK_BOTTOM      = 0xF3,
@@ -820,12 +824,16 @@ struct BLK_0x0C_PIN_DEF
 
     uint32_t m_Unknown4;
 
+    COND_GE<FMT_VER::V_180, uint32_t> m_Unknown5;
+
     std::array<int32_t, 2> m_Coords;
     std::array<int32_t, 2> m_Size;
 
-    std::array<uint32_t, 3> m_UnknownArray;
+    uint32_t m_GroupPtr;
+    uint32_t m_Unknown6;
+    uint32_t m_Unknown7;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown6;
+    COND_GE_LT<FMT_VER::V_174, FMT_VER::V_180, uint32_t> m_Unknown8;
 
     uint32_t GetShape() const
     {
@@ -1132,6 +1140,16 @@ struct PADSTACK_COMPONENT
  */
 struct BLK_0x1C_PADSTACK
 {
+    /**
+     * Pad flags are founds in a byte of the pad info
+     */
+    enum PAD_FLAGS
+    {
+        // Some through-holes have this, some don't
+        FLAG_UNKNOWN1   = 0x01,
+        FLAG_PLATED     = 0x20,
+    };
+
     uint8_t m_UnknownByte1;
 
     /**
@@ -1162,7 +1180,8 @@ struct BLK_0x1C_PADSTACK
     // Only lower 4 bits (top 4 are type)
     uint8_t m_A;
     uint8_t m_B;
-    uint8_t m_C;
+    /// Mask of @c PAD_FLAGS values
+    uint8_t m_Flags;
     uint8_t m_D;
 
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown7;
@@ -1401,7 +1420,7 @@ struct BLK_0x22_UNKNOWN
     uint16_t m_T2;
     uint32_t m_Key;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown1;
+    COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     std::array<uint32_t, 8> m_UnknownArray;
 };
@@ -1523,13 +1542,18 @@ struct BLK_0x28_SHAPE
     uint32_t m_Unknown4;
     uint32_t m_Unknown5;
 
-    COND_GE<FMT_VER::V_172, uint32_t> m_Ptr7;
+    COND_GE<FMT_VER::V_172, uint32_t> m_TablePtr;
 
     uint32_t m_Ptr6;
 
-    COND_LT<FMT_VER::V_172, uint32_t> m_Ptr7_16x;
+    COND_LT<FMT_VER::V_172, uint32_t> m_TablePtr_16x;
 
     std::array<int32_t, 4> m_Coords;
+
+    uint32_t GetTablePtr() const
+    {
+        return m_TablePtr.value_or( m_TablePtr_16x.value_or( 0 ) );
+    }
 };
 
 
@@ -2031,7 +2055,10 @@ struct BLK_0x36_DEF_TABLE
 
         COND_GE<FMT_VER::V_174, uint32_t> m_Unknown2;
 
-        std::array<uint32_t, 4> m_Xs;
+        uint32_t m_CharacterSpace;
+        uint32_t m_LineSpace;
+        uint32_t m_Unknown3;    // Always 0?
+        uint32_t m_StrokeWidth; // Aka "photo width"
 
         COND_GE<FMT_VER::V_172, std::array<uint32_t, 8>> m_Ys;
     };

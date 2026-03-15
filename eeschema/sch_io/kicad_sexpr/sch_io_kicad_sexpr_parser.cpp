@@ -3380,6 +3380,7 @@ SCH_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseSchematicSymbol()
                         case T_variant:
                         {
                             SCH_SYMBOL_VARIANT variant;
+                            variant.InitializeAttributes( *symbol );
 
                             for( token = NextTok(); token != T_RIGHT; token = NextTok() )
                             {
@@ -3408,6 +3409,13 @@ SCH_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseSchematicSymbol()
 
                                 case T_in_bom:
                                     variant.m_ExcludedFromBOM = parseBool();
+
+                                    // This fixes the incorrect logic from prior file versions.  The "in_bom" token
+                                    // used in the file format is the positive logic.  However, in the UI the term
+                                    // excluded from BOM is used which is the inverted logic.
+                                    if( m_requiredVersion >= 20260306 )
+                                        variant.m_ExcludedFromBOM = !variant.m_ExcludedFromBOM;
+
                                     NeedRIGHT();
                                     break;
 
@@ -3843,6 +3851,7 @@ SCH_SHEET* SCH_IO_KICAD_SEXPR_PARSER::parseSheet()
                         case T_variant:
                         {
                             SCH_SHEET_VARIANT variant;
+                            variant.InitializeAttributes( *sheet );
 
                             for( token = NextTok(); token != T_RIGHT; token = NextTok() )
                             {
@@ -3871,6 +3880,13 @@ SCH_SHEET* SCH_IO_KICAD_SEXPR_PARSER::parseSheet()
 
                                 case T_in_bom:
                                     variant.m_ExcludedFromBOM = parseBool();
+
+                                    // This fixes the incorrect logic from prior file versions.  The "in_bom" token
+                                    // used in the file format is the positive logic.  However, in the UI the term
+                                    // excluded from BOM is used which is the inverted logic.
+                                    if( m_requiredVersion >= 20260306 )
+                                        variant.m_ExcludedFromBOM = !variant.m_ExcludedFromBOM;
+
                                     NeedRIGHT();
                                     break;
 
@@ -3949,14 +3965,16 @@ SCH_SHEET* SCH_IO_KICAD_SEXPR_PARSER::parseSheet()
 
     sheet->SetFields( fields );
 
-    if( !sheet->GetField( FIELD_T::SHEET_NAME ) )
+    if( !FindField( sheet->GetFields(), FIELD_T::SHEET_NAME ) )
     {
-        THROW_PARSE_ERROR( _( "Missing sheet name property" ), CurSource(), CurLine(), CurLineNumber(), CurOffset() );
+        THROW_PARSE_ERROR( _( "Missing sheet name property" ), CurSource(), CurLine(),
+                           CurLineNumber(), CurOffset() );
     }
 
-    if( !sheet->GetField( FIELD_T::SHEET_FILENAME ) )
+    if( !FindField( sheet->GetFields(), FIELD_T::SHEET_FILENAME ) )
     {
-        THROW_PARSE_ERROR( _( "Missing sheet file property" ), CurSource(), CurLine(), CurLineNumber(), CurOffset() );
+        THROW_PARSE_ERROR( _( "Missing sheet file property" ), CurSource(), CurLine(),
+                           CurLineNumber(), CurOffset() );
     }
 
     return sheet.release();

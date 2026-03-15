@@ -39,6 +39,7 @@
 
 #include <base_units.h>
 #include <board_design_settings.h>
+#include <convert_basic_shapes_to_polygon.h>
 #include <geometry/shape_utils.h>
 #include <project/net_settings.h>
 #include <footprint.h>
@@ -48,8 +49,9 @@
 #include <pcb_text.h>
 #include <pcb_shape.h>
 #include <pcb_track.h>
+#include <priority_thread_pool_task.h>
 #include <zone.h>
-#include <convert_basic_shapes_to_polygon.h>
+#include <zone_utils.h>
 
 
 using namespace ALLEGRO;
@@ -264,6 +266,8 @@ static const std::unordered_map<LAYER_INFO, PCB_LAYER_ID> s_LayerKiMap = {
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_ASSEMBLY_TOP},         F_Fab},
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_PLACE_BOUND_BOTTOM},   B_CrtYd},
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_PLACE_BOUND_TOP},      F_CrtYd},
+    { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_PASTEMASK_BOTTOM},     B_Paste},
+    { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_PASTEMASK_TOP},        F_Paste},
 
     { { LAYER_INFO::CLASS::REF_DES,          LAYER_INFO::SUBCLASS::SILKSCREEN_BOTTOM},          B_SilkS},
     { { LAYER_INFO::CLASS::REF_DES,          LAYER_INFO::SUBCLASS::SILKSCREEN_TOP},             F_SilkS},
@@ -282,7 +286,6 @@ static const std::unordered_map<LAYER_INFO, PCB_LAYER_ID> s_LayerKiMap = {
  * This is a balance between running out of layers and dumping too much unrelated stuff on the same layer.
  */
 static const std::unordered_map<LAYER_INFO, wxString> s_OptionalFixedMappings = {
-    { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::DFA_BOUND_TOP},              "DFA_BOUND_TOP" },
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_DISPLAY_TOP},          "DISPLAY_TOP" },
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_DISPLAY_BOTTOM},       "DISPLAY_BOTTOM" },
     { { LAYER_INFO::CLASS::PACKAGE_GEOMETRY, LAYER_INFO::SUBCLASS::PGEOM_BODY_CENTER},          "BODY_CENTER" },
@@ -391,8 +394,10 @@ static wxString layerInfoDisplayName( const LAYER_INFO& aLayerInfo )
     };
 
     static const std::unordered_map<uint8_t, wxString> s_PackageGeometrySubclassNames = {
-        { LAYER_INFO::SUBCLASS::DFA_BOUND_BOTTOM,           wxS( "DFA Bound Bottom" ) },
-        { LAYER_INFO::SUBCLASS::DFA_BOUND_TOP,              wxS( "DFA Bound Top" ) },
+        { LAYER_INFO::SUBCLASS::PGEOM_PASTEMASK_BOTTOM,     wxS( "Pastemask Bottom" ) },
+        { LAYER_INFO::SUBCLASS::PGEOM_PASTEMASK_TOP,        wxS( "Pastemask Top" ) },
+        { LAYER_INFO::SUBCLASS::PGEOM_DFA_BOUND_BOTTOM,     wxS( "DFA Bound Bottom" ) },
+        { LAYER_INFO::SUBCLASS::PGEOM_DFA_BOUND_TOP,        wxS( "DFA Bound Top" ) },
         { LAYER_INFO::SUBCLASS::PGEOM_DISPLAY_BOTTOM,       wxS( "Display Bottom" ) },
         { LAYER_INFO::SUBCLASS::PGEOM_DISPLAY_TOP,          wxS( "Display Top" ) },
         { LAYER_INFO::SUBCLASS::PGEOM_SOLDERMASK_BOTTOM,    wxS( "Soldermask Bottom" ) },
@@ -514,10 +519,14 @@ static wxString layerInfoDisplayName( const LAYER_INFO& aLayerInfo )
  *
  * Keepins are bit trickier, but they're still rule areas and might need
  * custom DRC rules.
+ *
+ * In Allegro, zone-y/shape-y is distinguished by class/subclass rather than object type.
  */
 static bool layerIsZone( const LAYER_INFO& aLayerInfo )
 {
-    if ( aLayerInfo.m_Class == LAYER_INFO::CLASS::PACKAGE_KEEPIN ||
+    if ( aLayerInfo.m_Class == LAYER_INFO::CLASS::CONSTRAINTS_REGION ||
+         aLayerInfo.m_Class == LAYER_INFO::CLASS::BOUNDARY ||
+         aLayerInfo.m_Class == LAYER_INFO::CLASS::PACKAGE_KEEPIN ||
          aLayerInfo.m_Class == LAYER_INFO::CLASS::ROUTE_KEEPIN ||
          aLayerInfo.m_Class == LAYER_INFO::CLASS::PACKAGE_KEEPOUT ||
          aLayerInfo.m_Class == LAYER_INFO::CLASS::ROUTE_KEEPOUT ||
@@ -919,6 +928,54 @@ public:
         return lId;
     }
 
+
+    LSET GetRuleAreaLayers( const LAYER_INFO& aLayerInfo )
+    {
+        LSET layerSet{};
+
+        switch( aLayerInfo.m_Class )
+        {
+        case LAYER_INFO::CLASS::ROUTE_KEEPOUT:
+        case LAYER_INFO::CLASS::VIA_KEEPOUT:
+        case LAYER_INFO::CLASS::PACKAGE_KEEPOUT:
+        {
+            switch( aLayerInfo.m_Subclass )
+            {
+            case LAYER_INFO::SUBCLASS::KEEPOUT_ALL:
+                layerSet = LSET::AllCuMask();
+                break;
+            case LAYER_INFO::SUBCLASS::KEEPOUT_TOP:
+                layerSet = LSET{ F_Cu };
+                break;
+            case LAYER_INFO::SUBCLASS::KEEPOUT_BOTTOM:
+                layerSet = LSET{ B_Cu };
+                break;
+            default:
+                layerSet = LSET{ GetLayer( aLayerInfo ) };
+                break;
+            }
+            break;
+        }
+        case LAYER_INFO::CLASS::ROUTE_KEEPIN:
+        case LAYER_INFO::CLASS::PACKAGE_KEEPIN:
+        {
+            // This can be ALL, but can it be anything else?
+            if( aLayerInfo.m_Subclass == LAYER_INFO::SUBCLASS::KEEPOUT_ALL )
+                layerSet = LSET::AllCuMask();
+            else
+                layerSet = LSET{ GetLayer( aLayerInfo ) };
+            break;
+        }
+        default:
+            wxLogTrace( traceAllegroBuilder, "  Unhandled non-copper zone layer class %#02x, using default layers",
+                        aLayerInfo.m_Class );
+            layerSet = LSET{ GetLayer( aLayerInfo ) };
+            break;
+        }
+
+        return layerSet;
+    }
+
 private:
     static PCB_LAYER_ID getNthCopperLayer( int aNum, int aTotal )
     {
@@ -1040,6 +1097,101 @@ BOARD_BUILDER::BOARD_BUILDER( const BRD_DB& aRawBoard, BOARD& aBoard, REPORTER& 
 }
 
 
+/**
+ * Filled zones have their own outline and the fill itself comes from
+ * a bunch of "related" spaces. To convert this to a KiCad-ish ZONE,
+ * we need to chop out only the bit of the wider filled zone that applies
+ * to the outline (i.e. intersection).
+ *
+ * Then that fill has to be fractured.
+ *
+ * This is all repeated for each layer's separated filled areas.
+ *
+ * This takes ages, so this class handles the information you need to collect to do that
+ * later on in a thread pool, and does that.
+ */
+class BOARD_BUILDER::ZONE_FILL_HANDLER
+{
+public:
+    /**
+     * This is all the info needed to do the fill of one layer of one zone.
+     */
+    struct FILL_INFO
+    {
+        ZONE*        m_Zone;
+        PCB_LAYER_ID m_Layer;
+        /// The wider filled area we will chop a piece out of for this layer of this zone
+        SHAPE_POLY_SET m_CombinedFill;
+    };
+
+    /**
+     * Priority task dispatcher for zone fills - we want to do the biggest ones first.
+     *
+     * On average, sorting the largest zones first is slightly faster (5-10%) on large boards.
+     *
+     * However, if you allow the large zones to be assigned at random, as they basically will be
+     * if they are handled later in the process, there's a chance the very biggest zones will end up
+     * consecutive in the same thread which could be a substantial penalty.
+     */
+    class COMPLEX_FIRST_FILL_TASK : public PRIORITY_THREAD_POOL_TASK<std::vector<FILL_INFO>>
+    {
+    public:
+        COMPLEX_FIRST_FILL_TASK( bool aSimplify ) : m_simplify( aSimplify ) {}
+
+    private:
+        int computePriorityKey( const FILL_INFO& a ) const override
+        {
+            return static_cast<int>( a.m_CombinedFill.TotalVertices() );
+        }
+
+        size_t task( FILL_INFO& fillInfo ) override
+        {
+            SHAPE_POLY_SET finalFillPolys = *fillInfo.m_Zone->Outline();
+
+            finalFillPolys.ClearArcs();
+            fillInfo.m_CombinedFill.ClearArcs();
+
+            // Intersect the zone outline with the combined fill that was assembled
+            // from all the related objects.
+            finalFillPolys.BooleanIntersection( fillInfo.m_CombinedFill );
+            finalFillPolys.Fracture( m_simplify );
+
+            // This is already mutex-ed, so this is safe
+            fillInfo.m_Zone->SetFilledPolysList( fillInfo.m_Layer, finalFillPolys );
+            return 1;
+        }
+
+        bool m_simplify;
+    };
+
+    /**
+     * Process the polygons in a thread pool for more fans, more faster
+     */
+    void ProcessPolygons( bool aSimplify )
+    {
+        PROF_TIMER timer( "Zone fill processing" );
+
+        COMPLEX_FIRST_FILL_TASK fillTask( aSimplify );
+        fillTask.Execute( m_FillInfos );
+
+        wxLogTrace( traceAllegroPerf, wxT( "   Intersected and fractured zone fills in %.3f ms" ), // format:allow
+                    timer.msecs() );
+    }
+
+    void QueuePolygonForZone( ZONE& aZone, SHAPE_POLY_SET aFilledArea, PCB_LAYER_ID aLayer )
+    {
+        // Rule areas don't need filling
+        if( aZone.GetIsRuleArea() )
+            return;
+
+        m_FillInfos.emplace_back( &aZone, aLayer, std::move( aFilledArea ) );
+    }
+
+private:
+    std::vector<FILL_INFO> m_FillInfos;
+};
+
+
 BOARD_BUILDER::~BOARD_BUILDER()
 {
 }
@@ -1079,6 +1231,12 @@ VECTOR2I BOARD_BUILDER::scaleSize( const VECTOR2I& aSize ) const
         clampForScale( std::abs( aSize.x ) * m_scale ),
         clampForScale( std::abs( aSize.y ) * m_scale ),
     };
+}
+
+
+static EDA_ANGLE fromMillidegrees( uint32_t aMilliDegrees )
+{
+    return EDA_ANGLE{ static_cast<double>( aMilliDegrees ) / 1000.0, DEGREES_T };
 }
 
 
@@ -1878,10 +2036,7 @@ std::unique_ptr<PCB_TEXT> BOARD_BUILDER::buildPcbText( const BLK_0x30_STR_WRAPPE
 {
     std::unique_ptr<PCB_TEXT> text = std::make_unique<PCB_TEXT>( &aParent );
 
-    VECTOR2I     textPos = scale( VECTOR2I{ aStrWrapper.m_CoordsX, aStrWrapper.m_CoordsY } );
     PCB_LAYER_ID layer = getLayer( aStrWrapper.m_Layer );
-
-    text->SetPosition( textPos );
     text->SetLayer( layer );
 
     const BLK_0x31_SGRAPHIC* strGraphic = expectBlockByKey<BLK_0x31_SGRAPHIC>( aStrWrapper.m_StrGraphicPtr, 0x31 );
@@ -1920,10 +2075,19 @@ std::unique_ptr<PCB_TEXT> BOARD_BUILDER::buildPcbText( const BLK_0x30_STR_WRAPPE
     text->SetText( strGraphic->m_Value );
     text->SetTextWidth( scale( fontDef->m_CharWidth ) );
     text->SetTextHeight( scale( fontDef->m_CharHeight ) );
-    text->SetTextThickness( std::max( 1, scale( fontDef->m_CharHeight ) / 8 ) );
+    text->SetTextThickness( std::max( 1, scale( fontDef->m_StrokeWidth ) ) );
 
-    const EDA_ANGLE textAngle{ static_cast<double>( aStrWrapper.m_Rotation ) / 1000.0, DEGREES_T };
+    const EDA_ANGLE textAngle = fromMillidegrees( aStrWrapper.m_Rotation );
     text->SetTextAngle( textAngle );
+
+    VECTOR2I textPos = scale( VECTOR2I{ aStrWrapper.m_CoordsX, aStrWrapper.m_CoordsY } );
+
+    // KiCad's stroke font has a different baseline than Allegro's, so apply a vertical offset to compensate.
+    // The exact offset is a bit of guesswork based on visually matching Allegro and KiCad text, but the
+    // stoke font itself isn't the same anyway, so we can't be 100% here.
+    VECTOR2I textFontOffset = VECTOR2I{ 0, -( scale( fontDef->m_CharHeight ) * 45 ) / 100 };
+    RotatePoint( textFontOffset, textAngle );
+    text->SetPosition( textPos + textFontOffset );
 
     if( props->m_Reversal == BLK_0x30_STR_WRAPPER::TEXT_REVERSAL::REVERSED )
         text->SetMirrored( true );
@@ -2214,18 +2378,11 @@ std::unique_ptr<PCB_SHAPE> BOARD_BUILDER::buildRect( const BLK_0x24_RECT& aRect,
     shape->SetStart( cornerA );
     shape->SetEnd( cornerB );
 
-    const EDA_ANGLE angle{ static_cast<double>( aRect.m_Rotation ) / 1000.0, DEGREES_T };
+    const EDA_ANGLE angle = fromMillidegrees( aRect.m_Rotation );
     shape->Rotate( cornerA, angle );
 
     const int lineWidth = 0;
     shape->SetWidth( lineWidth );
-
-    if( aRect.m_Coords[0] == 1334202 )
-    {
-        wxLogTrace( traceAllegroBuilder, "Debug rect with coords [%d, %d, %d, %d], rotation %u, layer %#02x:%#02x",
-                    aRect.m_Coords[0], aRect.m_Coords[1], aRect.m_Coords[2], aRect.m_Coords[3],
-                    aRect.m_Rotation, aRect.m_Layer.m_Class, aRect.m_Layer.m_Subclass );
-    }
 
     return shape;
 }
@@ -2246,7 +2403,7 @@ std::unique_ptr<PCB_SHAPE> BOARD_BUILDER::buildRect( const BLK_0x0E_RECT& aRect,
     shape->SetStart( cornerA );
     shape->SetEnd( cornerB );
 
-    const EDA_ANGLE angle{ static_cast<double>( aRect.m_Rotation ) / 1000.0, DEGREES_T };
+    const EDA_ANGLE angle = fromMillidegrees( aRect.m_Rotation );
     shape->Rotate( cornerA, angle );
 
     const int lineWidth = 0;
@@ -2810,10 +2967,15 @@ std::vector<std::unique_ptr<BOARD_ITEM>> BOARD_BUILDER::buildPadItems( const BLK
         pad->SetAttribute( PAD_ATTRIB::SMD );
         pad->SetLayerSet( PAD::SMDMask() );
     }
-    else
+    else if( aPadstack.m_Flags & BLK_0x1C_PADSTACK::PAD_FLAGS::FLAG_PLATED )
     {
         pad->SetAttribute( PAD_ATTRIB::PTH );
         pad->SetLayerSet( PAD::PTHMask() );
+    }
+    else
+    {
+        pad->SetAttribute( PAD_ATTRIB::NPTH );
+        pad->SetLayerSet( PAD::UnplatedHoleMask() );
     }
 
     if( thermalGap.has_value() )
@@ -2849,6 +3011,8 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
 
     const BLK_0x07_COMPONENT_INST* fpInstData = getFpInstRef( aFpInstance );
 
+    const bool backSide = ( aFpInstance.m_Layer != 0 );
+
     wxLogTrace( traceAllegroBuilder, "Building footprint from 0x2D block key %#010x", aFpInstance.m_Key );
 
     wxString refDesStr;
@@ -2872,10 +3036,16 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
     wxLogTrace( traceAllegroBuilder, "  Footprint reference: '%s'", refDesStr );
 
     const VECTOR2I  fpPos = scale( VECTOR2I{ aFpInstance.m_CoordX, aFpInstance.m_CoordY } );
-    const EDA_ANGLE rotation{ aFpInstance.m_Rotation / 1000., DEGREES_T };
 
-    fp->SetPosition( fpPos );
-    fp->SetOrientation( rotation );
+    {
+        EDA_ANGLE rotation = fromMillidegrees( aFpInstance.m_Rotation );
+
+        if( backSide )
+            rotation = ANGLE_180 - rotation;
+
+        fp->SetPosition( fpPos );
+        fp->SetOrientation( rotation );
+    }
 
     // Allegro stores placed instance data in board-absolute form: bottom-side
     // components already have shapes on bottom layers with bottom-side positions.
@@ -2887,10 +3057,12 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
     // consistently mirrors positions AND layers for all children. Without this,
     // bottom-side footprints would have their back-layer graphics double-flipped
     // to the front.
-    const auto canonicalizeLayer = []( BOARD_ITEM* aItem )
+    //
+    // Even if there isn't a layer flip, the postions still need to be flipped.
+    const auto canonicalizeLayer = [backSide, fpPos]( BOARD_ITEM* aItem )
     {
-        if( IsBackLayer( aItem->GetLayer() ) )
-            aItem->SetLayer( FlipLayer( aItem->GetLayer() ) );
+        if( backSide )
+            aItem->Flip( fpPos, FLIP_DIRECTION::LEFT_RIGHT );
     };
 
     const LL_WALKER graphicsWalker{ aFpInstance.m_GraphicPtr, aFpInstance.m_Key, m_brdDb };
@@ -3028,14 +3200,47 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
 
     // Areas (courtyards, etc)
     LL_WALKER areaWalker{ aFpInstance.m_AreasPtr, aFpInstance.m_Key, m_brdDb };
+
+    // Probably don't need this as we can't have filled zone, but it's cheap
+    ZONE_FILL_HANDLER zoneFillHandler;
+
     for( const BLOCK_BASE* areaBlock : areaWalker )
     {
-        std::vector<std::unique_ptr<BOARD_ITEM>> shapes = buildGraphicItems( *areaBlock, *fp );
+        std::optional<LAYER_INFO> layerInfo = tryLayerFromBlock( *areaBlock );
 
-        for( std::unique_ptr<BOARD_ITEM>& item : shapes )
+        if( layerInfo.has_value() && layerIsZone( *layerInfo ) )
         {
-            canonicalizeLayer( item.get() );
-            fp->Add( item.release() );
+            // Zone within a footprint - we can handle keepouts at least
+            std::unique_ptr<ZONE> zone = buildZone( *areaBlock, {}, zoneFillHandler );
+            if( zone )
+            {
+                canonicalizeLayer( zone.get() );
+                fp->Add( zone.release() );
+            }
+        }
+        else
+        {
+            std::vector<std::unique_ptr<BOARD_ITEM>> shapes = buildGraphicItems( *areaBlock, *fp );
+
+            for( std::unique_ptr<BOARD_ITEM>& item : shapes )
+            {
+                canonicalizeLayer( item.get() );
+
+                // If we find shapes in the areas list, they are (presumably) filled.
+                // Maybe there's a flag to look at rather than just assuming this?
+                if( item->Type() == PCB_SHAPE_T )
+                {
+                    PCB_SHAPE& shape = static_cast<PCB_SHAPE&>( *item );
+
+                    // But in KiCad, courtyards are usually not filled even if they come in as "areas"
+                    if( shape.GetLayer() != F_CrtYd && shape.GetLayer() != B_CrtYd )
+                    {
+                        shape.SetFilled( true );
+                    }
+                }
+
+                fp->Add( item.release() );
+            }
         }
     }
 
@@ -3050,7 +3255,7 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
                 expectBlockByKey<BLK_0x04_NET_ASSIGNMENT>( placedPadInfo.m_NetPtr, 0x04 );
         const BLK_0x0D_PAD* padInfo = expectBlockByKey<BLK_0x0D_PAD>( placedPadInfo.m_PadPtr, 0x0D );
 
-        if( !netAssignment || !padInfo )
+        if( !padInfo )
             continue;
 
         const BLK_0x1C_PADSTACK* padStack = expectBlockByKey<BLK_0x1C_PADSTACK>( padInfo->m_PadStack, 0x1C );
@@ -3058,16 +3263,31 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
         if( !padStack )
             continue;
 
-        auto netIt = m_netCache.find( netAssignment->m_Net );
-        const int       netCode = ( netIt != m_netCache.end() ) ? netIt->second->GetNetCode()
-                                                                 : NETINFO_LIST::UNCONNECTED;
-        const wxString  padName = m_brdDb.GetString( padInfo->m_NameStrId );
+        int netCode = NETINFO_LIST::UNCONNECTED;
 
-        // 0x0D coordinates and rotation are in the footprint's local (unrotated) space.
+        if( netAssignment )
+        {
+            auto netIt = m_netCache.find( netAssignment->m_Net );
+            if( netIt != m_netCache.end() )
+                netCode = netIt->second->GetNetCode();
+        }
+
+        const wxString padName = m_brdDb.GetString( padInfo->m_NameStrId );
+
+        // 0x0D coordinates and rotation are in the footprint's local (unrotatesinced) space.
         // Use SetFPRelativePosition/Orientation to let KiCad handle the transform to
         // board-absolute coordinates (rotating by FP orientation and adding FP position).
-        const VECTOR2I  padLocalPos = scale( VECTOR2I{ padInfo->m_CoordsX, padInfo->m_CoordsY } );
-        const EDA_ANGLE padLocalRot{ static_cast<double>( padInfo->m_Rotation ) / 1000.0, DEGREES_T };
+        VECTOR2I  padLocalPos = scale( VECTOR2I{ padInfo->m_CoordsX, padInfo->m_CoordsY } );
+        EDA_ANGLE padLocalRot = fromMillidegrees( padInfo->m_Rotation );
+
+        // Unlike other items, pads in "canonical front side form" - a normal pad is on F.Cu already,
+        // but the positions, like all the other items, are in board-absolute form, so we need to pre-transform
+        // so that the final footprint flip puts them in the right place.
+        if ( backSide )
+        {
+            RotatePoint( padLocalPos, ANGLE_180 );
+            padLocalRot += ANGLE_180;
+        }
 
         std::vector<std::unique_ptr<BOARD_ITEM>> padItems = buildPadItems( *padStack, *fp, padName, netCode );
 
@@ -3086,16 +3306,11 @@ std::unique_ptr<FOOTPRINT> BOARD_BUILDER::buildFootprint( const BLK_0x2D_FOOTPRI
 
     // Flip AFTER adding all children so that graphics, text, and pads all get
     // their layers and positions mirrored correctly for bottom-layer footprints.
-    //
-    // Allegro mirrors bottom-side components via X-mirror (flip around Y axis),
-    // then rotates by R. KiCad's Flip(TOP_BOTTOM) is a Y-mirror which negates
-    // the orientation. Since X-mirror = Y-mirror + Rotate(180), we need the
-    // final orientation to be R+180. Flip negates what we set before it, so
-    // set -(R+180) to get R+180 after negation.
-    if( aFpInstance.m_Layer != 0 )
+    // We have carefully constructed a front-side canonical form by applying
+    // pre-transforms to compensate for the coming Flip().
+    if( backSide )
     {
-        fp->SetOrientation( -rotation - ANGLE_180 );
-        fp->Flip( fpPos, FLIP_DIRECTION::TOP_BOTTOM );
+        fp->Flip( fpPos, FLIP_DIRECTION::LEFT_RIGHT );
     }
 
     return fp;
@@ -3418,19 +3633,13 @@ void BOARD_BUILDER::createBoardShapes()
     {
         blockCount++;
 
-        // Skip boundary layer shapes - these are handled in the zones phase
-        const auto shouldSkip = []( const LAYER_INFO& aLayer ) -> bool
-        {
-            return aLayer.m_Class == LAYER_INFO::CLASS::BOUNDARY;
-        };
-
         switch( block->GetBlockType() )
         {
         case 0x0E:
         {
             const BLK_0x0E_RECT& rectData = BlockDataAs<BLK_0x0E_RECT>( *block );
 
-            if( shouldSkip( rectData.m_Layer ) )
+            if( layerIsZone( rectData.m_Layer ) )
                 continue;
 
             std::unique_ptr<PCB_SHAPE> rectShape = buildRect( rectData, m_board );
@@ -3441,7 +3650,7 @@ void BOARD_BUILDER::createBoardShapes()
         {
             const BLK_0x24_RECT& rectData = BlockDataAs<BLK_0x24_RECT>( *block );
 
-            if( shouldSkip( rectData.m_Layer ) )
+            if( layerIsZone( rectData.m_Layer ) )
                 continue;
 
             std::unique_ptr<PCB_SHAPE> rectShape = buildRect( rectData, m_board );
@@ -3452,7 +3661,7 @@ void BOARD_BUILDER::createBoardShapes()
         {
             const BLK_0x28_SHAPE& shapeData = BlockDataAs<BLK_0x28_SHAPE>( *block );
 
-            if( shouldSkip( shapeData.m_Layer ) )
+            if( layerIsZone( shapeData.m_Layer ) )
                 continue;
 
             std::vector<std::unique_ptr<PCB_SHAPE>> shapeItems = buildPolygonShapes( shapeData, m_board );
@@ -3482,6 +3691,9 @@ void BOARD_BUILDER::createBoardShapes()
         case 0x14:
         {
             const auto& graphicContainer = BlockDataAs<BLK_0x14_GRAPHIC>( *block );
+
+            if( layerIsZone( graphicContainer.m_Layer ) )
+                continue;
 
             std::vector<std::unique_ptr<PCB_SHAPE>> graphicItems = buildShapes( graphicContainer, m_board );
 
@@ -3617,6 +3829,9 @@ SHAPE_LINE_CHAIN BOARD_BUILDER::buildOutline( const BLK_0x0E_RECT& aRect ) const
     outline.Append( botRight );
     outline.Append( botLeft );
 
+    const EDA_ANGLE angle = fromMillidegrees( aRect.m_Rotation );
+    outline.Rotate( angle, topLeft );
+
     return outline;
 }
 
@@ -3634,6 +3849,9 @@ SHAPE_LINE_CHAIN BOARD_BUILDER::buildOutline( const BLK_0x24_RECT& aRect ) const
     outline.Append( topRight );
     outline.Append( botRight );
     outline.Append( botLeft );
+
+    const EDA_ANGLE angle = fromMillidegrees( aRect.m_Rotation );
+    outline.Rotate( angle, topLeft );
 
     return outline;
 }
@@ -3768,6 +3986,16 @@ SHAPE_POLY_SET ALLEGRO::BOARD_BUILDER::tryBuildZoneShape( const BLOCK_BASE& aBlo
         polySet = SHAPE_POLY_SET( chain );
         break;
     }
+    case 0x14:
+    {
+        const auto& graphicContainer = BlockDataAs<BLK_0x14_GRAPHIC>( aBlock );
+
+        SHAPE_LINE_CHAIN chain = buildSegmentChain( graphicContainer.m_SegmentPtr );
+        chain.SetClosed( true );
+
+        polySet = SHAPE_POLY_SET( chain );
+        break;
+    }
     case 0x24:
     {
         const auto& rectData = BlockDataAs<BLK_0x24_RECT>( aBlock );
@@ -3792,56 +4020,9 @@ SHAPE_POLY_SET ALLEGRO::BOARD_BUILDER::tryBuildZoneShape( const BLOCK_BASE& aBlo
 }
 
 
-static LSET getRuleAreaLayers( const LAYER_INFO& aLayerInfo, PCB_LAYER_ID aDefault )
-{
-    LSET layerSet{ aDefault };
-
-    switch( aLayerInfo.m_Class )
-    {
-    case LAYER_INFO::CLASS::ROUTE_KEEPOUT:
-    case LAYER_INFO::CLASS::VIA_KEEPOUT:
-    case LAYER_INFO::CLASS::PACKAGE_KEEPOUT:
-    {
-        switch( aLayerInfo.m_Subclass )
-        {
-        case LAYER_INFO::SUBCLASS::KEEPOUT_ALL:
-            layerSet = LSET::AllCuMask();
-            break;
-        case LAYER_INFO::SUBCLASS::KEEPOUT_TOP:
-            layerSet = LSET{ F_Cu };
-            break;
-        case LAYER_INFO::SUBCLASS::KEEPOUT_BOTTOM:
-            layerSet = LSET{ B_Cu };
-            break;
-        default:
-            wxLogTrace( traceAllegroBuilder, "  Unhandled keepout layer subclass %#02x, using default layers",
-                        aLayerInfo.m_Subclass );
-        }
-        break;
-    }
-    case LAYER_INFO::CLASS::ROUTE_KEEPIN:
-    case LAYER_INFO::CLASS::PACKAGE_KEEPIN:
-    {
-        // This can be ALL, but can it be anything else?
-        if( aLayerInfo.m_Subclass == LAYER_INFO::SUBCLASS::KEEPOUT_ALL )
-            layerSet = LSET::AllCuMask();
-        else
-            wxLogTrace( traceAllegroBuilder, "  Unhandled keepin layer subclass %#02x, using default layers",
-                        aLayerInfo.m_Subclass );
-        break;
-    }
-    default:
-        wxLogTrace( traceAllegroBuilder, "  Unhandled non-copper zone layer class %#02x, using default layers",
-                    aLayerInfo.m_Class );
-        break;
-    }
-
-    return layerSet;
-}
-
-
 std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&                     aBoundaryBlock,
-                                                const std::vector<const BLOCK_BASE*>& aRelatedBlocks )
+                                                const std::vector<const BLOCK_BASE*>& aRelatedBlocks,
+                                                ZONE_FILL_HANDLER&                    aZoneFillHandler )
 {
     int              netCode = NETINFO_LIST::UNCONNECTED;
     const LAYER_INFO layerInfo = expectLayerFromBlock( aBoundaryBlock );
@@ -3897,7 +4078,7 @@ std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&               
     }
     else
     {
-        LSET layerSet = getRuleAreaLayers( layerInfo, Cmts_User );
+        LSET layerSet = m_layerMapper->GetRuleAreaLayers( layerInfo );
 
         bool isRouteKeepout = ( layerInfo.m_Class == LAYER_INFO::CLASS::ROUTE_KEEPOUT );
         bool isViaKeepout = ( layerInfo.m_Class == LAYER_INFO::CLASS::VIA_KEEPOUT );
@@ -3933,7 +4114,7 @@ std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&               
         {
         case 0x1B:
         {
-            auto it = m_netCache.find( block->GetKey() );
+            const auto it = m_netCache.find( block->GetKey() );
 
             if( it != m_netCache.end() )
             {
@@ -3956,7 +4137,6 @@ std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&               
 
             SHAPE_POLY_SET fillPolySet = shapeToPolySet( shapeData );
             combinedFill.Append( fillPolySet );
-
             m_usedZoneFillShapes.emplace( block->GetKey() );
             break;
         }
@@ -3974,18 +4154,23 @@ std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&               
     // Add zone fills
     if( isCopperZone && !combinedFill.IsEmpty() )
     {
-        SHAPE_POLY_SET zoneOutline = *zone->Outline();
+        // We don't do this here, though it feels like we should. We collect the
+        // information for batch processing later on (which is conceptually
+        // easier to parallelise compared to this function).  But there is room
+        // for improvement by threading more of this work: shapeToPolySet
+        // accounts for about 40% of the remaining single-threaded time in the
+        // building process.
 
-        combinedFill.ClearArcs();
-        zoneOutline.ClearArcs();
-
-        combinedFill.BooleanIntersection( zoneOutline );
-        combinedFill.Fracture( true );
-
-        zone->SetFilledPolysList( layer, combinedFill );
+        // combinedFill.ClearArcs();
+        // zoneOutline.ClearArcs();
+        // combinedFill.BooleanIntersection( zoneOutline );
+        // zone->SetFilledPolysList( layer, combinedFill );
 
         zone->SetIsFilled( true );
         zone->SetNeedRefill( false );
+
+        // Poke these relevant context in here for batch processing later on
+        aZoneFillHandler.QueuePolygonForZone( *zone, std::move( combinedFill ), layer );
     }
 
     return zone;
@@ -3994,19 +4179,14 @@ std::unique_ptr<ZONE> BOARD_BUILDER::buildZone( const BLOCK_BASE&               
 
 std::vector<const BLOCK_BASE*> BOARD_BUILDER::getShapeRelatedBlocks( const BLK_0x28_SHAPE& aShape ) const
 {
-    // Follow pointer chain: BOUNDARY.Ptr7 -> 0x2C TABLE -> Ptr1 -> 0x37 -> m_Ptrs
+    // Follow pointer chain: BOUNDARY.TablePtr -> 0x2C TABLE -> Ptr1 -> 0x37 -> m_Ptrs
     std::vector<const BLOCK_BASE*> ret;
-    uint32_t                       ptr7Key = 0;
+    uint32_t                       tableKey = aShape.GetTablePtr();
 
-    if( aShape.m_Ptr7.has_value() )
-        ptr7Key = aShape.m_Ptr7.value();
-    else if( aShape.m_Ptr7_16x.has_value() )
-        ptr7Key = aShape.m_Ptr7_16x.value();
-
-    if( ptr7Key == 0 )
+    if( tableKey == 0 )
         return ret;
 
-    const BLK_0x2C_TABLE* tbl = expectBlockByKey<BLK_0x2C_TABLE>( ptr7Key, 0x2C );
+    const BLK_0x2C_TABLE* tbl = expectBlockByKey<BLK_0x2C_TABLE>( tableKey, 0x2C );
 
     if( !tbl )
         return ret;
@@ -4064,15 +4244,30 @@ void BOARD_BUILDER::createBoardText()
 }
 
 
+template <std::derived_from<BOARD_ITEM> T>
+void BulkAddToBoard( BOARD& aBoard, std::vector<std::unique_ptr<T>>&& aItems )
+{
+    std::vector<BOARD_ITEM*> rawPointers;
+    rawPointers.reserve( aItems.size() );
+
+    for( std::unique_ptr<T>& item : aItems )
+    {
+        rawPointers.push_back( item.get() );
+        aBoard.Add( item.release(), ADD_MODE::BULK_APPEND );
+    }
+
+    aBoard.FinalizeBulkAdd( rawPointers );
+}
+
+
 void BOARD_BUILDER::createZones()
 {
     wxLogTrace( traceAllegroBuilder, "Creating zones from m_LL_Shapes and m_LL_0x24_0x28" );
 
-    int boundaryCount = 0;
-    int mergedCount = 0;
-    int keepoutCount = 0;
+    std::vector<std::unique_ptr<ZONE>> newZones;
+    std::vector<std::unique_ptr<ZONE>> keepoutZones;
 
-    std::vector<std::unique_ptr<ZONE>> boundaryZones;
+    ZONE_FILL_HANDLER zoneFillHandler;
 
     // Walk m_LL_Shapes to find BOUNDARY shapes (zone outlines).
     // BOUNDARY shapes use class 0x15 with copper layer subclass indices.
@@ -4080,119 +4275,60 @@ void BOARD_BUILDER::createZones()
 
     for( const BLOCK_BASE* block : shapeWalker )
     {
-        if( block->GetBlockType() != 0x28 )
-            continue;
+        std::unique_ptr<ZONE> zone;
+        LAYER_INFO            layerInfo{};
 
-        const BLK_0x28_SHAPE& shapeData =
-                static_cast<const BLOCK<BLK_0x28_SHAPE>&>( *block ).GetData();
+        switch( block->GetBlockType() )
+        {
+        case 0x0e:
+        {
+            const BLK_0x0E_RECT& rectData = static_cast<const BLOCK<BLK_0x0E_RECT>&>( *block ).GetData();
 
-        if( shapeData.m_Layer.m_Class != LAYER_INFO::CLASS::BOUNDARY )
-            continue;
+            if( !layerIsZone( rectData.m_Layer ) )
+                continue;
 
-        std::unique_ptr<ZONE> zone = buildZone( *block, getShapeRelatedBlocks( shapeData ) );
+            zone = buildZone( *block, {}, zoneFillHandler );
+            layerInfo = rectData.m_Layer;
+            break;
+        }
+        case 0x24:
+        {
+            const BLK_0x24_RECT& rectData = static_cast<const BLOCK<BLK_0x24_RECT>&>( *block ).GetData();
+
+            if( !layerIsZone( rectData.m_Layer ) )
+                continue;
+
+            zone = buildZone( *block, {}, zoneFillHandler );
+            layerInfo = rectData.m_Layer;
+            break;
+        }
+        case 0x28:
+        {
+            const BLK_0x28_SHAPE& shapeData = static_cast<const BLOCK<BLK_0x28_SHAPE>&>( *block ).GetData();
+
+            if( !layerIsZone( shapeData.m_Layer ) )
+                continue;
+
+            zone = buildZone( *block, getShapeRelatedBlocks( shapeData ), zoneFillHandler );
+            layerInfo = shapeData.m_Layer;
+            break;
+        }
+        default:
+        {
+            wxLogTrace( traceAllegroBuilder, "Unhandled block type in zone shape walker: %#04x, key: %#010x",
+                        block->GetBlockType(), block->GetKey() );
+            break;
+        }
+        }
 
         if( zone )
         {
-            wxLogTrace( traceAllegroBuilder, "  Zone %#010x net=%d layer=%s (subclass=%#04x)", shapeData.m_Key,
-                        zone->GetNetCode(), m_board.GetLayerName( zone->GetFirstLayer() ),
-                        shapeData.m_Layer.m_Subclass );
+            wxLogTrace( traceAllegroBuilder, "  Zone %#010x net=%d layer=%s class=%#04x:%#04x", block->GetKey(),
+                        zone->GetNetCode(), m_board.GetLayerName( zone->GetFirstLayer() ), layerInfo.m_Class,
+                        layerInfo.m_Subclass );
 
-            zone->SetIslandRemovalMode( ISLAND_REMOVAL_MODE::NEVER );
-            boundaryZones.push_back( std::move( zone ) );
-            boundaryCount++;
+            newZones.push_back( std::move( zone ) );
         }
-    }
-
-    // Merge zones with identical polygons and same net into multi-layer zones.
-    // Allegro often defines the same zone outline on multiple copper layers (e.g.
-    // a ground pour spanning all layers). KiCad represents this as a single zone
-    // with multiple fill layers.
-    std::vector<bool> merged( boundaryZones.size(), false );
-
-    for( size_t i = 0; i < boundaryZones.size(); i++ )
-    {
-        if( merged[i] )
-            continue;
-
-        ZONE*                                            primary = boundaryZones[i].get();
-        const SHAPE_POLY_SET::POLYGON&                   primaryPolygon = primary->Outline()->CPolygon( 0 );
-        LSET                                             layers = primary->GetLayerSet();
-        std::unordered_map<PCB_LAYER_ID, SHAPE_POLY_SET> mergedFills;
-
-        for( size_t j = i + 1; j < boundaryZones.size(); j++ )
-        {
-            if( merged[j] )
-                continue;
-
-            ZONE* candidate = boundaryZones[j].get();
-
-            if( candidate->GetNetCode() != primary->GetNetCode() )
-                continue;
-
-            const SHAPE_POLY_SET::POLYGON& candidatePolygon = candidate->Outline()->CPolygon( 0 );
-
-            if( primaryPolygon.size() != candidatePolygon.size() )
-                continue;
-
-            bool polygonsDiffer = false;
-
-            for( size_t lineChainId = 0; lineChainId < primaryPolygon.size(); lineChainId++ )
-            {
-                const SHAPE_LINE_CHAIN& primaryChain = primaryPolygon[lineChainId];
-                const SHAPE_LINE_CHAIN& candidateChain = candidatePolygon[lineChainId];
-
-                if( primaryChain.PointCount() != candidateChain.PointCount()
-                    || primaryChain.BBox() != candidateChain.BBox()
-                    || !primaryChain.CompareGeometry( candidateChain ) )
-                {
-                    polygonsDiffer = true;
-                    break;
-                }
-            }
-
-            if( !polygonsDiffer )
-            {
-                for( PCB_LAYER_ID layer : candidate->GetLayerSet() )
-                {
-                    if( SHAPE_POLY_SET* fill = candidate->GetFill( layer ) )
-                        mergedFills[layer] = *fill;
-                }
-
-                layers |= candidate->GetLayerSet();
-                merged[j] = true;
-                mergedCount++;
-
-                wxLogTrace( traceAllegroBuilder, "  Merging zone on %s into zone on %s (net %d)",
-                            m_board.GetLayerName( candidate->GetFirstLayer() ),
-                            m_board.GetLayerName( primary->GetFirstLayer() ), primary->GetNetCode() );
-            }
-        }
-
-        if( layers != primary->GetLayerSet() )
-        {
-            for( PCB_LAYER_ID layer : primary->GetLayerSet() )
-            {
-                if( SHAPE_POLY_SET* fill = primary->GetFill( layer ) )
-                    mergedFills[layer] = *fill;
-            }
-
-            primary->SetLayerSet( layers );
-
-            for( const auto& [layer, fill] : mergedFills )
-                primary->SetFilledPolysList( layer, fill );
-
-            primary->SetNeedRefill( false );
-            primary->SetIsFilled( true );
-        }
-
-        m_board.Add( boundaryZones[i].release(), ADD_MODE::APPEND );
-    }
-
-    if( mergedCount > 0 )
-    {
-        wxLogTrace( traceAllegroBuilder,
-                    "  Merged %d zones into multi-layer zones (%d zones remain from %d)",
-                    mergedCount, boundaryCount - mergedCount, boundaryCount );
     }
 
     // Walk m_LL_0x24_0x28 for keepout/in shapes
@@ -4214,7 +4350,7 @@ void BOARD_BUILDER::createZones()
             wxLogTrace( traceAllegroBuilder, "  Processing %s rect %#010x", layerInfoDisplayName( rectData.m_Layer ),
                         rectData.m_Key );
 
-            zone = buildZone( *block, {} );
+            zone = buildZone( *block, {}, zoneFillHandler );
             break;
         }
         case 0x28:
@@ -4227,7 +4363,7 @@ void BOARD_BUILDER::createZones()
             wxLogTrace( traceAllegroBuilder, "  Processing %s shape %#010x", layerInfoDisplayName( shapeData.m_Layer ),
                         shapeData.m_Key );
 
-            zone = buildZone( *block, {} );
+            zone = buildZone( *block, {}, zoneFillHandler );
             break;
         }
         default:
@@ -4236,14 +4372,39 @@ void BOARD_BUILDER::createZones()
 
         if( zone )
         {
-            m_board.Add( zone.release(), ADD_MODE::APPEND );
-            keepoutCount++;
+            newZones.push_back( std::move( zone ) );
         }
     }
 
-    wxLogTrace( traceAllegroBuilder,
-                "Created %d zone outlines (%d merged), %d keepout areas",
-                boundaryCount - mergedCount, mergedCount, keepoutCount );
+    // Deal with all the collected zone fill polygons now, all at once
+    zoneFillHandler.ProcessPolygons( true );
+
+    int originalCount = newZones.size();
+
+    // Merge zones with identical polygons and same net into multi-layer zones.
+    // Allegro often defines the same zone outline on multiple copper layers (e.g.
+    // a ground pour spanning all layers). KiCad represents this as a single zone
+    // with multiple fill layers.
+    //
+    // Rule areas (keepouts) can also merge.
+    std::vector<std::unique_ptr<ZONE>> mergedZones = MergeZonesWithSameOutline( std::move( newZones ) );
+    int                                mergedCount = mergedZones.size();
+
+    int keepoutCount = 0;
+    int boundaryCount = 0;
+
+    for( const std::unique_ptr<ZONE>& zone : mergedZones )
+    {
+        if( zone->GetIsRuleArea() )
+            keepoutCount++;
+        else
+            boundaryCount++;
+    }
+
+    BulkAddToBoard( m_board, std::move( mergedZones ) );
+
+    wxLogTrace( traceAllegroBuilder, "Created %d zone outlines and %d keepout areas (%d merged away), ", boundaryCount,
+                keepoutCount, originalCount - mergedCount );
 }
 
 
@@ -4340,19 +4501,12 @@ void BOARD_BUILDER::createTables()
             std::unique_ptr<PCB_GROUP> group = std::make_unique<PCB_GROUP>( &m_board );
             group->SetName( tableName );
 
-            std::vector<BOARD_ITEM*> bulkAddedItems;
-            bulkAddedItems.reserve( newItems.size() + 1 );
-            bulkAddedItems.push_back( group.get() );
+            for( const auto& item : newItems )
+                group->AddItem( item.get() );
 
-            for( std::unique_ptr<BOARD_ITEM>& newItem : newItems )
-            {
-                m_board.Add( newItem.get(), ADD_MODE::BULK_APPEND );
-                bulkAddedItems.push_back( newItem.get() );
-                group->AddItem( newItem.release() );
-            }
+            newItems.push_back( std::move( group ) );
 
-            m_board.Add( group.release(), ADD_MODE::BULK_APPEND );
-            m_board.FinalizeBulkAdd( bulkAddedItems );
+            BulkAddToBoard( m_board, std::move( newItems ) );
         }
     }
 }

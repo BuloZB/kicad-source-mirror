@@ -88,6 +88,9 @@ SCH_IO_KICAD_SEXPR::~SCH_IO_KICAD_SEXPR()
 void SCH_IO_KICAD_SEXPR::init( SCHEMATIC* aSchematic,
                                const std::map<std::string, UTF8>* aProperties )
 {
+    if( m_schematic != aSchematic )
+        m_loadedRootSheets.clear();
+
     m_version   = 0;
     m_appending = false;
     m_rootSheet = nullptr;
@@ -160,6 +163,7 @@ SCH_SHEET* SCH_IO_KICAD_SEXPR::LoadSchematicFile( const wxString& aFileName, SCH
         // If we got here, the schematic loaded successfully.
         sheet = newSheet.release();
         m_rootSheet = nullptr;         // Quiet Coverity warning.
+        m_loadedRootSheets.push_back( sheet );
     }
     else
     {
@@ -231,6 +235,17 @@ void SCH_IO_KICAD_SEXPR::loadHierarchy( const SCH_SHEET_PATH& aParentSheetPath, 
             // load path so we have to check both.
             if( !m_rootSheet->SearchHierarchy( fileName.GetFullPath(), &screen ) )
                 m_currentSheetPath.at( 0 )->SearchHierarchy( fileName.GetFullPath(), &screen );
+
+            // When loading multiple top-level sheets that reference the same sub-sheet file,
+            // the screen may have already been loaded by a previous top-level sheet.
+            if( !screen )
+            {
+                for( SCH_SHEET* prevRoot : m_loadedRootSheets )
+                {
+                    if( prevRoot->SearchHierarchy( fileName.GetFullPath(), &screen ) )
+                        break;
+                }
+            }
         }
 
         if( screen )
@@ -927,7 +942,7 @@ void SCH_IO_KICAD_SEXPR::saveSymbol( SCH_SYMBOL* aSymbol, const SCHEMATIC& aSche
                             KICAD_FORMAT::FormatBool( m_out, "exclude_from_sim", variant.m_ExcludedFromSim );
 
                         if( variant.m_ExcludedFromBOM != aSymbol->GetExcludedFromBOM() )
-                            KICAD_FORMAT::FormatBool( m_out, "in_bom", variant.m_ExcludedFromBOM );
+                            KICAD_FORMAT::FormatBool( m_out, "in_bom", !variant.m_ExcludedFromBOM );
 
                         if( variant.m_ExcludedFromBoard != aSymbol->GetExcludedFromBoard() )
                             KICAD_FORMAT::FormatBool( m_out, "on_board", !variant.m_ExcludedFromBoard );
@@ -1180,7 +1195,7 @@ void SCH_IO_KICAD_SEXPR::saveSheet( SCH_SHEET* aSheet, const SCH_SHEET_LIST& aSh
                         KICAD_FORMAT::FormatBool( m_out, "exclude_from_sim", variant.m_ExcludedFromSim );
 
                     if( variant.m_ExcludedFromBOM != aSheet->GetExcludedFromBOM() )
-                        KICAD_FORMAT::FormatBool( m_out, "in_bom", variant.m_ExcludedFromBOM );
+                        KICAD_FORMAT::FormatBool( m_out, "in_bom", !variant.m_ExcludedFromBOM );
 
                     for( const auto&[fname, fvalue] : variant.m_Fields )
                     {
@@ -1654,7 +1669,7 @@ void SCH_IO_KICAD_SEXPR::cacheLib( const wxString& aLibraryFileName,
         delete m_cache;
         m_cache = new SCH_IO_KICAD_SEXPR_LIB_CACHE( aLibraryFileName );
 
-        if( !isBuffering( aProperties ) || isNewCache )
+        if( !isBuffering( aProperties ) || ( isNewCache && m_cache->isLibraryPathValid() ) )
         {
             m_cache->Load();
             m_cache->m_modHash = oldModifyHash + 1;

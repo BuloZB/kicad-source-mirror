@@ -44,6 +44,7 @@
 #include <footprint_library_adapter.h>
 #include <eda_3d_viewer_frame.h>
 #include <project_pcb.h>
+#include <pad.h>
 #include <pcb_track.h>
 
 #include <base_units.h>
@@ -1923,8 +1924,6 @@ void RENDER_3D_RAYTRACE_BASE::load3DModels( CONTAINER_3D& aDstContainer,
     {
         return;
     }
-
-    const wxString currentVariant = m_boardAdapter.GetBoard()->GetCurrentVariant();
 
     // Go for all footprints
     for( FOOTPRINT* fp : m_boardAdapter.GetBoard()->Footprints() )

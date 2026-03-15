@@ -2202,7 +2202,8 @@ void CONNECTION_GRAPH::processSubGraphs()
                         subgraph->m_bus_neighbors[member].insert( candidate );
                         candidate->m_bus_parents[member].insert( subgraph );
                     }
-                    else if( !connection->IsBus()
+                    else if( ( !connection->IsBus()
+                              && !candidate->m_driver_connection->IsBus() )
                            || connection->Type() == candidate->m_driver_connection->Type() )
                     {
                         wxLogTrace( ConnTrace, wxS( "%lu (%s) absorbs neighbor %lu (%s)" ),
@@ -3137,8 +3138,8 @@ std::shared_ptr<SCH_CONNECTION> CONNECTION_GRAPH::getDefaultConnection( SCH_ITEM
 SCH_CONNECTION* CONNECTION_GRAPH::matchBusMember( SCH_CONNECTION* aBusConnection,
                                                   SCH_CONNECTION* aSearch )
 {
-    // Should we return a null pointer if the connection is not a bus connection?
-    wxASSERT( aBusConnection->IsBus() );
+    if( !aBusConnection->IsBus() )
+        return nullptr;
 
     SCH_CONNECTION* match = nullptr;
 
@@ -4238,12 +4239,6 @@ bool CONNECTION_GRAPH::ercCheckLabels( const CONNECTION_SUBGRAPH* aSubgraph )
             size_t allPins = pinCount;
             size_t localPins = pinCount;
 
-            // For local labels that are bus members, track local pins separately.
-            // A local label connected to a bus that crosses hierarchy boundaries should
-            // still have a local connection to component pins. Without this check, a label
-            // that only connects to pins through the hierarchical bus would not be flagged.
-            bool isBusMemberLabel = ( type == SCH_LABEL_T ) && !aSubgraph->m_bus_parents.empty();
-
             auto it = m_net_name_to_subgraphs_map.find( netName );
 
             if( it != m_net_name_to_subgraphs_map.end() )
@@ -4270,9 +4265,11 @@ bool CONNECTION_GRAPH::ercCheckLabels( const CONNECTION_SUBGRAPH* aSubgraph )
                 ok = false;
             }
 
-            // For local bus member labels, check that there's at least one local pin connection.
-            // Labels that only connect to pins through a hierarchical bus should be flagged.
-            if( allPins == 0 || ( isBusMemberLabel && localPins == 0 && !has_nc ) )
+            // A local label should connect to at least one component pin on its own
+            // sheet. A label that only reaches pins through hierarchy (sheet pins or
+            // buses) serves no local purpose and is likely mislabeled.
+            if( allPins == 0
+                || ( type == SCH_LABEL_T && localPins == 0 && allPins > 1 && !has_nc ) )
             {
                 reportError( text, ERCE_LABEL_NOT_CONNECTED );
                 ok = false;
