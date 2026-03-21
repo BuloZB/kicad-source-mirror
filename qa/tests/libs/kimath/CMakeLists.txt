@@ -39,6 +39,8 @@ set( QA_KIMATH_SRCS
     geometry/test_half_line.cpp
     geometry/test_oval.cpp
     geometry/test_poly_triangulation.cpp
+    geometry/test_triangulation_benchmark.cpp
+    geometry/test_pip_benchmark.cpp
     geometry/test_segment.cpp
     geometry/test_shape_compound_collision.cpp
     geometry/test_shape_arc.cpp
@@ -83,6 +85,7 @@ add_executable( qa_kimath
 target_link_libraries( qa_kimath
     qa_utils
     kimath
+    nlohmann_json
     Boost::headers
     Boost::unit_test_framework
     ${wxWidgets_LIBRARIES}

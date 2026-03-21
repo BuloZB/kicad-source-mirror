@@ -566,6 +566,13 @@ TOOL_ACTION PCB_ACTIONS::editLibFpInFpEditor( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Edit Library Footprint..." ) )
         .Icon( BITMAPS::module_editor ) );
 
+TOOL_ACTION PCB_ACTIONS::findByProperties( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.EditorControl.findByProperties" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Find by Properties..." ) )
+        .Tooltip( _( "Find board items matching property criteria or expressions" ) )
+        .Icon( BITMAPS::find ) );
+
 TOOL_ACTION PCB_ACTIONS::getAndPlace( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveEdit.FindMove" )
         .Scope( AS_GLOBAL )
@@ -1640,6 +1647,7 @@ TOOL_ACTION PCB_ACTIONS::flipBoard( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Flip Board View" ) )
         .Tooltip( _( "View board from the opposite side" ) )
+        .ToolbarState( TOOLBAR_STATE::TOGGLE )
         .Icon( BITMAPS::flip_board ) );
 
 TOOL_ACTION PCB_ACTIONS::rehatchShapes( TOOL_ACTION_ARGS()

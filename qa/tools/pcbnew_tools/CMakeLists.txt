@@ -31,6 +31,8 @@ add_executable( qa_pcbnew_tools
     tools/polygon_generator/polygon_generator.cpp
 
     tools/polygon_triangulation/polygon_triangulation.cpp
+
+    tools/extract_zone_fills/extract_zone_fills.cpp
 )
 
 include_directories(

@@ -87,6 +87,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_export_vrml_base.cpp
     dialogs/dialog_find.cpp
     dialogs/dialog_find_base.cpp
+    dialogs/dialog_find_by_properties.cpp
+    dialogs/dialog_find_by_properties_base.cpp
     dialogs/dialog_footprint_wizard_list.cpp
     dialogs/dialog_footprint_wizard_list_base.cpp
     dialogs/dialog_gen_footprint_position.cpp
@@ -781,8 +783,9 @@ add_subdirectory( pcb_io/fabmaster )
 add_subdirectory( pcb_io/ipc2581 )
 add_subdirectory( pcb_io/odbpp )
 add_subdirectory( pcb_io/pads )
+add_subdirectory( pcb_io/sprint_layout )
 
-set( PCBNEW_IO_LIBRARIES pcad2kicadpcb allegro2pcbnew altium2pcbnew cadstar2pcbnew easyeda easyedapro fabmaster ipc2581 odbpp pads2pcbnew CACHE INTERNAL "")
+set( PCBNEW_IO_LIBRARIES pcad2kicadpcb allegro2pcbnew altium2pcbnew cadstar2pcbnew easyeda easyedapro fabmaster ipc2581 odbpp pads2pcbnew sprint_layout2pcbnew CACHE INTERNAL "")
 
 #a very small program launcher for pcbnew_kiface
 add_executable( pcbnew WIN32 MACOSX_BUNDLE

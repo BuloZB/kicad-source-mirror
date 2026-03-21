@@ -44,6 +44,7 @@ class PCB_GROUP;
 class PCB_DIMENSION_BASE;
 class DRC;
 class DIALOG_FIND;
+class DIALOG_FIND_BY_PROPERTIES;
 class DIALOG_PLOT;
 class ZONE;
 class GENERAL_COLLECTOR;
@@ -152,6 +153,16 @@ public:
     void ShowFindDialog();
 
     /**
+     * Show the Find by Properties dialog.
+     */
+    void ShowFindByPropertiesDialog();
+
+    /**
+     * Notify the Find by Properties dialog that the selection has changed.
+     */
+    void NotifyFindByPropertiesDialog();
+
+    /**
      * Find the next item using our existing search parameters.
      */
     void FindNext( bool reverse = false );
@@ -174,6 +185,12 @@ public:
      * will be selected.
      */
     void UpdateVariantSelectionCtrl();
+
+    /**
+     * Set the current variant on the board and update the drawing sheet's cached
+     * variant name and description accordingly.
+     */
+    void SetCurrentVariant( const wxString& aVariantName );
 
     /**
      * Event handler for variant selection changes in the toolbar.
@@ -843,6 +860,7 @@ public:
 
     void StartCrossProbeFlash( const std::vector<BOARD_ITEM*>& aItems );
     void OnCrossProbeFlashTimer( wxTimerEvent& aEvent );
+    void UpdateProperties() override;
 
 private:
     friend struct PCB::IFACE;
@@ -855,14 +873,15 @@ private:
      * the list of assignable hot keys since it's only available as an advanced configuration
      * option.
      */
-    TOOL_ACTION*           m_exportNetlistAction;
+    TOOL_ACTION* m_exportNetlistAction;
 
-    DIALOG_FIND*           m_findDialog;
-    DIALOG_BOOK_REPORTER*  m_inspectDrcErrorDlg;
-    DIALOG_BOOK_REPORTER*  m_inspectClearanceDlg;
-    DIALOG_BOOK_REPORTER*  m_inspectConstraintsDlg;
-    DIALOG_BOOK_REPORTER*  m_footprintDiffDlg;
-    DIALOG_BOARD_SETUP*    m_boardSetupDlg;
+    DIALOG_FIND*               m_findDialog;
+    DIALOG_FIND_BY_PROPERTIES* m_findByPropertiesDialog;
+    DIALOG_BOOK_REPORTER*      m_inspectDrcErrorDlg;
+    DIALOG_BOOK_REPORTER*      m_inspectClearanceDlg;
+    DIALOG_BOOK_REPORTER*      m_inspectConstraintsDlg;
+    DIALOG_BOOK_REPORTER*      m_footprintDiffDlg;
+    DIALOG_BOARD_SETUP*        m_boardSetupDlg;
 
     std::vector<LIB_ID>    m_designBlockHistoryList;
     PCB_DESIGN_BLOCK_PANE* m_designBlocksPane;

@@ -265,7 +265,7 @@ void PCB_BARCODE::AssembleBarcode()
     if( !m_angle.IsZero() )
         m_poly.Rotate( m_angle, m_pos );
 
-    m_poly.CacheTriangulation( false );
+    m_poly.CacheTriangulation();
     m_bbox = m_poly.BBox();
 }
 
