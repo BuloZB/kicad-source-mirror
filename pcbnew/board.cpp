@@ -203,6 +203,9 @@ bool BOARD::BuildConnectivity( PROGRESS_REPORTER* aReporter )
 
 void BOARD::SetProject( PROJECT* aProject, bool aReferenceOnly )
 {
+    if( m_project == aProject )
+        return;
+
     if( m_project )
         ClearProject();
 

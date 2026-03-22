@@ -1611,14 +1611,6 @@ TOOL_ACTION PCB_ACTIONS::updateLocalRatsnest( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .Parameter( VECTOR2I() ) );
 
-TOOL_ACTION PCB_ACTIONS::showPythonConsole( TOOL_ACTION_ARGS()
-        .Name( "pcbnew.Control.showPythonConsole" )
-        .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Scripting Console" ) )
-        .Tooltip( _( "Show the Python scripting console" ) )
-        .Icon( BITMAPS::py_script )
-        .ToolbarState( TOOLBAR_STATE::TOGGLE) );
-
 TOOL_ACTION PCB_ACTIONS::showLayersManager( TOOL_ACTION_ARGS()
         .Name( "pcbnew.Control.showLayersManager" )
         .Scope( AS_GLOBAL )
@@ -2805,20 +2797,6 @@ TOOL_ACTION PCB_ACTIONS::resetWizardPrms( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Reset wizard parameters" ) )
         .Tooltip( _( "Reset wizard parameters to default" ) )
         .Icon( BITMAPS::reload ) );
-
-TOOL_ACTION PCB_ACTIONS::selectPreviousWizardPage( TOOL_ACTION_ARGS()
-        .Name( "pcbnew.FpWizard.selectPreviousWizardPage" )
-        .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Select previous wizard page" ) )
-        .Tooltip( _( "Select previous parameters page" ) )
-        .Icon( BITMAPS::lib_previous ) );
-
-TOOL_ACTION PCB_ACTIONS::selectNextWizardPage( TOOL_ACTION_ARGS()
-        .Name( "pcbnew.FpWizard.selectNextWizardPage" )
-        .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Select next wizard page" ) )
-        .Tooltip( _( "Select next parameters page" ) )
-        .Icon( BITMAPS::lib_next ) );
 
 TOOL_ACTION PCB_ACTIONS::exportFpToEditor( TOOL_ACTION_ARGS()
         .Name( "pcbnew.FpWizard.exportFpToEditor" )

@@ -496,6 +496,8 @@ if( KICAD_IPC_API )
     set( EESCHEMA_SRCS
         ${EESCHEMA_SRCS}
         api/api_handler_sch.cpp
+        api/headless_sch_context.cpp
+        api/sch_context.cpp
     )
 endif()
 
@@ -647,7 +649,6 @@ target_link_libraries( eeschema_kiface
         pads_common
         pcm
         markdown_lib
-        scripting
         core
         Boost::headers
         ${wxWidgets_LIBRARIES}

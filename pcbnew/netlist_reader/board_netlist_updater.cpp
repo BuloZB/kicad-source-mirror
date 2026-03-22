@@ -378,7 +378,7 @@ FOOTPRINT* BOARD_NETLIST_UPDATER::replaceFootprint( NETLIST& aNetlist, FOOTPRINT
              // Expand the footprint pad layers
              newFootprint->FixUpPadsForBoard( m_board );
 
-             m_frame->ExchangeFootprint( aFootprint, newFootprint, m_commit );
+             m_frame->ExchangeFootprint( aFootprint, newFootprint, m_commit, true );
 
              msg.Printf( _( "Changed %s footprint from '%s' to '%s'."),
                          aFootprint->GetReference(),

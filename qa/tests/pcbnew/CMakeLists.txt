@@ -38,6 +38,7 @@ set( QA_PCBNEW_SRCS
     test_barcode_load_save.cpp
     test_board_connected_items.cpp
     test_board_design_settings.cpp
+    test_board_loader.cpp
     test_board_item.cpp
     test_board_commit.cpp
     test_board_statistics.cpp
@@ -48,8 +49,10 @@ set( QA_PCBNEW_SRCS
     test_graphics_load_save.cpp
     test_graphics_import_mgr.cpp
     test_group_load_save.cpp
+    test_headless_board_context.cpp
     test_footprint.cpp
     test_footprint_load_save.cpp
+    test_footprint_realignment.cpp
     test_fp_lib_load_save.cpp
     test_io_mgr.cpp
     test_lset.cpp
@@ -193,7 +196,6 @@ target_link_libraries( qa_pcbnew
     gal
     common
     gal
-    scripting
     qa_utils
     dxflib_qcad
     tinyspline_lib
@@ -203,7 +205,6 @@ target_link_libraries( qa_pcbnew
     ${PCBNEW_IO_LIBRARIES}
     ${wxWidgets_LIBRARIES}
     ${GDI_PLUS_LIBRARIES}
-    ${PYTHON_LIBRARIES}
     Boost::headers
     Boost::unit_test_framework
     ${PCBNEW_EXTRA_LIBS}    # -lrt must follow Boost

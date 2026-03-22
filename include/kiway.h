@@ -106,6 +106,8 @@
 #include <mail_type.h>
 #include <ki_exception.h>
 
+class KICAD_API_SERVER;
+
 
 #define KIFACE_VERSION      1
 #define KIFACE_GETTER       KIFACE_1
@@ -256,6 +258,26 @@ struct KIFACE
         return 0;
     }
 
+    virtual bool HandleApiOpenDocument( const wxString& aPath,
+                                        KICAD_API_SERVER* aServer,
+                                        wxString* aError )
+    {
+        if( aError )
+            *aError = wxS( "OpenDocument is not implemented for this face" );
+
+        return false;
+    }
+
+    virtual bool HandleApiCloseDocument( const wxString& aBoardFileName,
+                                         KICAD_API_SERVER* aServer,
+                                         wxString* aError )
+    {
+        if( aError )
+            *aError = wxS( "CloseDocument is not implemented for this face" );
+
+        return false;
+    }
+
     virtual void PreloadLibraries( KIWAY* aKiway ) {}
 
     virtual void CancelPreload( bool aBlock = true ) {}
@@ -306,7 +328,6 @@ public:
         FACE_PL_EDITOR,
         FACE_PCB_CALCULATOR,
         FACE_BMP2CMP,
-        FACE_PYTHON,
 
         KIWAY_FACE_COUNT
     };
@@ -459,6 +480,14 @@ public:
                      PROGRESS_REPORTER* aProgressReporter = nullptr );
     bool ProcessJobConfigDialog( KIWAY::FACE_T aFace, JOB* aJob, wxWindow* aWindow );
 
+    bool ProcessApiOpenDocument( KIWAY::FACE_T aFace, const wxString& aPath,
+                                 KICAD_API_SERVER* aServer,
+                                 wxString* aError = nullptr );
+
+    bool ProcessApiCloseDocument( KIWAY::FACE_T aFace, const wxString& aPath,
+                                  KICAD_API_SERVER* aServer,
+                                  wxString* aError = nullptr );
+
     /**
      * Gets the window pointer to the blocking dialog (to send it signals)
      * @return Pointer to blocking dialog window or null if none
@@ -508,11 +537,7 @@ private:
 };
 
 
-#ifndef SWIG
-// provided by single_top.cpp and kicad.cpp;
 extern KIWAY Kiway;
-// whereas python launchers: single_top.py and project manager instantiate as a python object
-#endif
 
 
 /**
