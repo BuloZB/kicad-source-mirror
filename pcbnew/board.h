@@ -1559,9 +1559,10 @@ public:
     mutable std::unordered_map<const ZONE*, SHAPE_POLY_SET> m_DeflatedZoneOutlineCache;
 
     // ------------ DRC caches -------------
-    std::vector<ZONE*>    m_DRCZones;
-    std::vector<ZONE*>    m_DRCCopperZones;
-    int                   m_DRCMaxClearance;
+    std::vector<ZONE*>                       m_DRCZones;
+    std::vector<ZONE*>                       m_DRCCopperZones;
+    std::map<PCB_LAYER_ID, std::vector<ZONE*>> m_DRCCopperZonesByLayer;
+    int                                      m_DRCMaxClearance;
     int                   m_DRCMaxPhysicalClearance;
     ZONE*                 m_SolderMaskBridges;  // A container to build bridges on solder mask layers
     std::map<ZONE*, std::map<PCB_LAYER_ID, ISOLATED_ISLANDS>> m_ZoneIsolatedIslandsMap;

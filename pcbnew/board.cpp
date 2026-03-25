@@ -295,6 +295,7 @@ void BOARD::IncrementTimeStamp()
         m_DRCMaxPhysicalClearance = 0;
         m_DRCZones.clear();
         m_DRCCopperZones.clear();
+        m_DRCCopperZonesByLayer.clear();
         m_ZoneIsolatedIslandsMap.clear();
         m_CopperZoneRTreeCache.clear();
 
