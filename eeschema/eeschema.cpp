@@ -113,16 +113,8 @@ static std::unique_ptr<SCHEMATIC> readSchematicFromFile( const std::string& aFil
 
     if( !project )
     {
-        if( wxFileExists( projectPath ) )
-        {
-            // cli
-            manager.LoadProject( projectPath, true );
-            project = manager.GetProject( projectPath );
-        }
-        else
-        {
-            manager.LoadProject( "" );
-        }
+        manager.LoadProject( projectPath, true );
+        project = manager.GetProject( projectPath );
     }
 
     schematic->Reset();
@@ -315,7 +307,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
             for( ACTION_TOOLBAR_CONTROL* control : ACTION_TOOLBAR::GetCustomControlList( FRAME_SCH_SYMBOL_EDITOR ) )
                 controls.push_back( control );
 
-            return new PANEL_TOOLBAR_CUSTOMIZATION( aParent, cfg, tb, actions, controls );
+            return new PANEL_TOOLBAR_CUSTOMIZATION( aParent, cfg, tb, FRAME_SCH_SYMBOL_EDITOR, actions, controls );
         }
 
         case PANEL_SYM_COLORS:
@@ -371,7 +363,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
             for( ACTION_TOOLBAR_CONTROL* control : ACTION_TOOLBAR::GetCustomControlList( FRAME_SCH ) )
                 controls.push_back( control );
 
-            return new PANEL_TOOLBAR_CUSTOMIZATION( aParent, cfg, tb, actions, controls );
+            return new PANEL_TOOLBAR_CUSTOMIZATION( aParent, cfg, tb, FRAME_SCH, actions, controls );
         }
 
         case PANEL_SCH_COLORS:

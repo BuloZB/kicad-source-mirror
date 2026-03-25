@@ -32,10 +32,6 @@ endif()
 # Generate DEPFILES without transforming relative paths
 cmake_policy( SET CMP0116 OLD )
 
-# Needed to allow the doxygen-python process that depends on swig generation running twice to occur
-# The current structure requires the add_custom_command to get called twice, the NEW behavior deduplicates it
-cmake_policy( SET CMP0113 OLD )
-
 #  Enable CMAKE_MSVC_DEBUG_INFORMATION_FORMAT to override the cmake pdb flags easily
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
@@ -957,23 +953,6 @@ check_find_package_result( PYTHONINTERP_FOUND "Python Interpreter" )
 #
 # Find wxWidgets library, required
 #
-
-# Check if '--toolkit=xxx' option has been passed
-string( REGEX MATCH "--toolkit=([a-zA-Z0-9]+)"
-    WXWIDGETS_REQUESTED_TOOLKIT "${wxWidgets_CONFIG_OPTIONS}" )
-
-if( WXWIDGETS_REQUESTED_TOOLKIT
-        AND NOT WXWIDGETS_REQUESTED_TOOLKIT STREQUAL "--toolkit=${WXPYTHON_TOOLKIT}" )
-    message( WARNING "wxWidgets and wxPython must be based on the same toolkit.\n"
-        "It will be fixed automatically if you skip the '--toolkit=xxx' "
-        "wxWidgets_CONFIG_OPTIONS parameter.")
-elseif( UNIX AND NOT APPLE )
-    # Force the use of GTK3 on Linux
-    set( wxWidgets_CONFIG_OPTIONS ${wxWidgets_CONFIG_OPTIONS} "--toolkit=gtk3" )
-else()
-    # Use the same toolkit as wxPython otherwise there will be a symbol conflict
-    set( wxWidgets_CONFIG_OPTIONS ${wxWidgets_CONFIG_OPTIONS} "--toolkit=${WXPYTHON_TOOLKIT}" )
-endif()
 
 set( wxWidgets_REQ_VERSION 3.2.0 )
 

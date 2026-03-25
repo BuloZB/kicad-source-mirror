@@ -408,7 +408,7 @@ void DIALOG_DRC::OnRunDRCClick( wxCommandEvent& aEvent )
 
     m_runningResultsBook->ChangeSelection( 0 );   // Display the "Tests Running..." tab
     m_messages->Clear();
-    wxSafeYield();                                // Allow time slice to refresh Messages
+    Update();                                     // Repaint only, don't enter the full event loop
 
     m_running = true;
     m_sdbSizerCancel->SetLabel( _( "Cancel" ) );
@@ -428,7 +428,7 @@ void DIALOG_DRC::OnRunDRCClick( wxCommandEvent& aEvent )
         m_messages->Report( _( "Done.<br><br>" ) );
 
     Raise();
-    wxSafeYield();                                // Allow time slice to refresh Messages
+    Update();                                     // Repaint only, don't enter the full event loop
 
     m_running = false;
     m_sdbSizerCancel->SetLabel( _( "Close" ) );

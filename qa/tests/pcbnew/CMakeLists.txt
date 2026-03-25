@@ -38,6 +38,7 @@ set( QA_PCBNEW_SRCS
     test_barcode_load_save.cpp
     test_board_connected_items.cpp
     test_board_design_settings.cpp
+    test_board_item_index.cpp
     test_board_loader.cpp
     test_board_item.cpp
     test_board_commit.cpp
@@ -68,7 +69,6 @@ set( QA_PCBNEW_SRCS
     test_reference_image_load.cpp
     test_gencad_export.cpp
     test_pdf_output_path.cpp
-    test_plot_controller.cpp
     test_shape_corner_radius.cpp
     test_pcb_grid_helper.cpp
     test_save_load.cpp
@@ -109,6 +109,7 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_creepage_issue20480.cpp
     drc/test_drc_creepage_issue21482.cpp
     drc/test_drc_creepage_issue23364.cpp
+    drc/test_drc_creepage_issue23389.cpp
     drc/test_drc_physical_clearance.cpp
     drc/test_drc_rule_editor.cpp
     drc/test_drc_bitmap_overlay_panel.cpp

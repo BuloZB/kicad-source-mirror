@@ -107,6 +107,18 @@ private:
     HANDLER_RESULT<GraphicsDefaultsResponse> handleGetGraphicsDefaults(
             const HANDLER_CONTEXT<GetGraphicsDefaults>& aCtx );
 
+    HANDLER_RESULT<BoardDesignRulesResponse> handleGetBoardDesignRules(
+            const HANDLER_CONTEXT<GetBoardDesignRules>& aCtx );
+
+    HANDLER_RESULT<BoardDesignRulesResponse> handleSetBoardDesignRules(
+            const HANDLER_CONTEXT<SetBoardDesignRules>& aCtx );
+
+    HANDLER_RESULT<CustomRulesResponse> handleGetCustomDesignRules(
+            const HANDLER_CONTEXT<GetCustomDesignRules>& aCtx );
+
+    HANDLER_RESULT<CustomRulesResponse> handleSetCustomDesignRules(
+            const HANDLER_CONTEXT<SetCustomDesignRules>& aCtx );
+
     HANDLER_RESULT<types::Vector2> handleGetBoardOrigin(
             const HANDLER_CONTEXT<GetBoardOrigin>& aCtx );
 
@@ -127,12 +139,24 @@ private:
     HANDLER_RESULT<types::TitleBlockInfo> handleGetTitleBlockInfo(
             const HANDLER_CONTEXT<commands::GetTitleBlockInfo>& aCtx );
 
+    HANDLER_RESULT<Empty> handleSetTitleBlockInfo(
+            const HANDLER_CONTEXT<commands::SetTitleBlockInfo>& aCtx );
+
     HANDLER_RESULT<commands::ExpandTextVariablesResponse> handleExpandTextVariables(
             const HANDLER_CONTEXT<commands::ExpandTextVariables>& aCtx );
 
     HANDLER_RESULT<Empty> handleInteractiveMoveItems( const HANDLER_CONTEXT<InteractiveMoveItems>& aCtx );
 
     HANDLER_RESULT<NetsResponse> handleGetNets( const HANDLER_CONTEXT<GetNets>& aCtx );
+
+    HANDLER_RESULT<commands::GetItemsResponse> handleGetConnectedItems(
+            const HANDLER_CONTEXT<GetConnectedItems>& aCtx );
+
+    HANDLER_RESULT<commands::GetItemsResponse> handleGetItemsByNet(
+            const HANDLER_CONTEXT<GetItemsByNet>& aCtx );
+
+    HANDLER_RESULT<commands::GetItemsResponse> handleGetItemsByNetClass(
+            const HANDLER_CONTEXT<GetItemsByNetClass>& aCtx );
 
     HANDLER_RESULT<NetClassForNetsResponse> handleGetNetClassForNets(
             const HANDLER_CONTEXT<GetNetClassForNets>& aCtx );
@@ -245,6 +269,8 @@ private:
             const google::protobuf::RepeatedPtrField<google::protobuf::Any>& aItems,
             std::function<void(commands::ItemStatus, google::protobuf::Any)> aItemHandler )
             override;
+
+    std::vector<KICAD_T> parseRequestedItemTypes( const google::protobuf::RepeatedField<int>& aTypes );
 
     std::shared_ptr<BOARD_CONTEXT> m_context;
 };

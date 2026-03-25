@@ -165,6 +165,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_multichannel_generate_rule_areas.cpp
     dialogs/dialog_multichannel_repeat_layout_base.cpp
     dialogs/dialog_multichannel_repeat_layout.cpp
+    dialogs/dialog_router_save_test_case_base.cpp
+    dialogs/dialog_router_save_test_case.cpp
     dialogs/panel_display_options.cpp
     dialogs/panel_display_options_base.cpp
     dialogs/panel_edit_options.cpp
@@ -434,6 +436,8 @@ set( PCBNEW_CLASS_SRCS
     zone_settings_bag.cpp
     edit_zone_helpers.cpp
 
+    api/headless_board_context.cpp
+
     ratsnest/ratsnest.cpp
 
     tools/array_tool.cpp
@@ -515,7 +519,6 @@ set( PCBNEW_COMMON_SRCS
 if( KICAD_IPC_API )
     set( PCBNEW_SRCS ${PCBNEW_SRCS}
         api/api_handler_pcb.cpp
-        api/headless_board_context.cpp
         api/board_context.cpp
         )
 endif()
@@ -780,10 +783,10 @@ if( APPLE )
         )
 
     set_target_properties( pcbnew PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
+            "@executable_path/../Frameworks" )
 
     set_target_properties( pcbnew_kiface PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
+            "@executable_path/../Frameworks" )
     set_target_properties( pcbnew_kiface PROPERTIES BUILD_WITH_INSTALL_RPATH 1 )
 
 #put individual bundle outside of main bundle as a first step

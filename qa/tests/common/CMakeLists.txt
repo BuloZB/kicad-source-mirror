@@ -65,6 +65,7 @@ set( QA_COMMON_SRCS
     test_property.cpp
     test_property_holder.cpp
     test_reporting.cpp
+    test_rc_tree_model.cpp
     test_refdes_utils.cpp
     test_grid_helper.cpp
     test_string_utils.cpp
