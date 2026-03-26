@@ -1168,10 +1168,8 @@ void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testZonesToZones()
     bool testClearance = !m_drcEngine->IsErrorLimitExceeded( DRCE_CLEARANCE );
     bool testIntersects = !m_drcEngine->IsErrorLimitExceeded( DRCE_ZONES_INTERSECT );
 
-    std::vector<std::map<PCB_LAYER_ID, std::vector<SEG>>> poly_segments;
-    std::vector<std::map<PCB_LAYER_ID, SEG_RTREE>>        seg_rtrees;
-    poly_segments.resize( m_board->m_DRCCopperZones.size() );
-    seg_rtrees.resize( m_board->m_DRCCopperZones.size() );
+    std::vector<std::map<PCB_LAYER_ID, std::vector<SEG>>> poly_segments( m_board->m_DRCCopperZones.size() );
+    std::vector<std::map<PCB_LAYER_ID, SEG_RTREE>>        seg_rtrees( m_board->m_DRCCopperZones.size() );
 
     thread_pool&        tp = GetKiCadThreadPool();
     std::atomic<size_t> done( 0 );

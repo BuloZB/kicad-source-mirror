@@ -126,12 +126,10 @@ long PYTHON_MANAGER::Execute( const std::vector<wxString>& aArgs,
 
     args.emplace_back( nullptr );
 
-    int flags = wxTheApp->UsesEventLoop() ? wxEXEC_ASYNC : wxEXEC_BLOCK;
-
-    if( flags & wxEXEC_ASYNC )
+    if( wxTheApp->UsesEventLoop() )
     {
         wxLogTrace( traceApi, wxString::Format( "Execute async: %s %s", m_interpreterPath, argsStr ) );
-        long pid = wxExecute( args.data(), flags, process, aEnv );
+        long pid = wxExecute( args.data(), wxEXEC_ASYNC, process, aEnv );
 
         if( pid == 0 )
         {
@@ -165,7 +163,7 @@ long PYTHON_MANAGER::Execute( const std::vector<wxString>& aArgs,
         wxLogTrace( traceApi, wxString::Format( "Execute sync: %s %s", m_interpreterPath, argsStr ) );
         wxArrayString out, err;
         wxString cmd = wxString::Format( "%s %s", m_interpreterPath, argsStr );
-        long ret = wxExecute( cmd, out, err, flags, aEnv );
+        long ret = wxExecute( cmd, out, err, wxEXEC_BLOCK, aEnv );
 
         wxString strOut, strErr;
 
