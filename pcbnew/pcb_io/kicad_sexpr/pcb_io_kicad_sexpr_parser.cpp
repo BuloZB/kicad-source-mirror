@@ -1352,6 +1352,20 @@ BOARD* PCB_IO_KICAD_SEXPR_PARSER::parseBOARD_unchecked()
             catch( const PARSE_ERROR& e )
             {
                 m_parseWarnings.push_back( e.What() );
+
+                // ParseEmbedded may have stopped mid-section. Skip remaining
+                // tokens so the board parser doesn't see them at the top level.
+                int depth = 0;
+
+                for( int tok = embeddedFilesParser.NextTok();
+                     tok != DSN_EOF;
+                     tok = embeddedFilesParser.NextTok() )
+                {
+                    if( tok == DSN_LEFT )
+                        depth++;
+                    else if( tok == DSN_RIGHT && --depth < 0 )
+                        break;
+                }
             }
 
             SyncLineReaderWith( embeddedFilesParser );
@@ -2021,17 +2035,26 @@ void PCB_IO_KICAD_SEXPR_PARSER::parseBoardStackup()
         else if( !( layerId & 1 ) )
             type = BS_ITEM_TYPE_COPPER;
 
-        BOARD_STACKUP_ITEM* item = nullptr;
+        std::unique_ptr<BOARD_STACKUP_ITEM> itemOwner;
+        BOARD_STACKUP_ITEM*                 item = nullptr;
 
         if( type != BS_ITEM_TYPE_UNDEFINED )
         {
-            item = new BOARD_STACKUP_ITEM( type );
+            // A 32-copper-layer board has at most 69 stackup items (32 copper +
+            // 31 dielectric + 6 mask/paste/silk).  Anything far beyond that
+            // indicates a corrupted file.  Parse the item so tokens are consumed
+            // correctly, but don't keep it.
+            static constexpr int MAX_STACKUP_ITEMS = 128;
+
+            itemOwner = std::make_unique<BOARD_STACKUP_ITEM>( type );
+            item = itemOwner.get();
             item->SetBrdLayerId( layerId );
 
             if( type == BS_ITEM_TYPE_DIELECTRIC )
                 item->SetDielectricLayerId( dielectric_idx++ );
 
-            stackup.Add( item );
+            if( stackup.GetCount() < MAX_STACKUP_ITEMS )
+                stackup.Add( itemOwner.release() );
         }
         else
         {
@@ -2145,6 +2168,7 @@ void PCB_IO_KICAD_SEXPR_PARSER::parseBoardStackup()
                 item->AddDielectricPrms( sublayer_idx );
             }
         }
+
     }
 
     if( token != T_RIGHT )
@@ -5565,6 +5589,18 @@ FOOTPRINT* PCB_IO_KICAD_SEXPR_PARSER::parseFOOTPRINT_unchecked( wxArrayString* a
             catch( const PARSE_ERROR& e )
             {
                 m_parseWarnings.push_back( e.What() );
+
+                int depth = 0;
+
+                for( int tok = embeddedFilesParser.NextTok();
+                     tok != DSN_EOF;
+                     tok = embeddedFilesParser.NextTok() )
+                {
+                    if( tok == DSN_LEFT )
+                        depth++;
+                    else if( tok == DSN_RIGHT && --depth < 0 )
+                        break;
+                }
             }
 
             SyncLineReaderWith( embeddedFilesParser );

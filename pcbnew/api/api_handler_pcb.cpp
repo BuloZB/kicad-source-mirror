@@ -1300,14 +1300,10 @@ HANDLER_RESULT<BoardDesignRulesResponse> API_HANDLER_PCB::handleGetBoardDesignRu
 
     for( const auto& [errorCode, severity] : bds.m_DRCSeverities )
     {
-        std::shared_ptr<DRC_ITEM> drcItem = DRC_ITEM::Create( errorCode );
-
-        if( !drcItem || drcItem->GetSettingsKey().IsEmpty() )
-            continue;
-
-        kiapi::board::DrcSeveritySetting* setting = rules->add_severities();
-        setting->set_error_key( drcItem->GetSettingsKey().ToStdString() );
-        setting->set_severity( ToProtoEnum<SEVERITY, kiapi::common::types::RuleSeverity>( severity ) );
+        board::DrcSeveritySetting* setting = rules->add_severities();
+        setting->set_rule_type(
+                ToProtoEnum<PCB_DRC_CODE, board::DrcErrorType>( static_cast<PCB_DRC_CODE>( errorCode ) ) );
+        setting->set_severity( ToProtoEnum<SEVERITY, types::RuleSeverity>( severity ) );
     }
 
     for( const wxString& serialized : bds.m_DrcExclusions )
@@ -1485,15 +1481,8 @@ HANDLER_RESULT<BoardDesignRulesResponse> API_HANDLER_PCB::handleSetBoardDesignRu
 
         for( const kiapi::board::DrcSeveritySetting& severitySetting : rules.severities() )
         {
-            std::shared_ptr<DRC_ITEM> drcItem = DRC_ITEM::Create( wxString::FromUTF8( severitySetting.error_key() ) );
-
-            if( !drcItem )
-            {
-                ApiResponseStatus e;
-                e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-                e.set_error_message( fmt::format( "Unknown DRC error key '{}'", severitySetting.error_key() ) );
-                return tl::unexpected( e );
-            }
+            PCB_DRC_CODE ruleType =
+                    FromProtoEnum<PCB_DRC_CODE, kiapi::board::DrcErrorType>( severitySetting.rule_type() );
 
             const std::unordered_set<SEVERITY> permitted( { RPT_SEVERITY_ERROR, RPT_SEVERITY_WARNING, RPT_SEVERITY_IGNORE } );
             SEVERITY setting = FromProtoEnum<SEVERITY, kiapi::common::types::RuleSeverity>( severitySetting.severity() );
@@ -1506,7 +1495,7 @@ HANDLER_RESULT<BoardDesignRulesResponse> API_HANDLER_PCB::handleSetBoardDesignRu
                 return tl::unexpected( e );
             }
 
-            newSettings.m_DRCSeverities[drcItem->GetErrorCode()] = setting;
+            newSettings.m_DRCSeverities[ruleType] = setting;
         }
     }
 
@@ -3114,7 +3103,7 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportPs
     if( std::optional<ApiResponseStatus> err = ApplyBoardPlotSettings( aCtx.Request.plot_settings(), job ) )
         return tl::unexpected( *err );
 
-        if( std::optional<ApiResponseStatus> paginationError =
+    if( std::optional<ApiResponseStatus> paginationError =
             ValidatePaginationModeForSingleOrPerFile( aCtx.Request.page_mode(),
                                                       "RunBoardJobExportPs" ) )
     {

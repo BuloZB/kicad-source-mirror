@@ -20,6 +20,7 @@
 #include <api/api_enums.h>
 #include <import_export.h>
 #include <api/common/types/enums.pb.h>
+#include <api/board/board.pb.h>
 #include <api/board/board_types.pb.h>
 #include <api/schematic/schematic_jobs.pb.h>
 #include <api/schematic/schematic_types.pb.h>

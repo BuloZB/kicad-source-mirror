@@ -533,7 +533,7 @@ void PGM_BASE::SaveCommonSettings()
 {
     // GetCommonSettings() is not initialized until fairly late in the
     // process startup: InitPgm(), so test before using:
-    if( GetCommonSettings() )
+    if( GetCommonSettings() && IsGUI() )
         GetCommonSettings()->m_System.working_dir = wxGetCwd();
 }
 

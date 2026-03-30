@@ -736,10 +736,14 @@ void ACTION_TOOLBAR::onToolEvent( wxAuiToolBarEvent& aEvent )
         // The selection tool is a special case because it is the "default" tool and does not show
         // up on the tool stack. We want to toggle through selection modes only when the tool is
         // already active.
-        bool selectionSpecialCase =
-                m_parent->ToolStackIsEmpty()
-                && ( actionIt->second->GetId() == ACTIONS::selectSetRect.GetId()
-                     || actionIt->second->GetId() == ACTIONS::selectSetLasso.GetId() );
+        bool selectionSpecialCase = false;
+
+        if( actionIt != m_toolActions.end() )
+        {
+            selectionSpecialCase = m_parent->ToolStackIsEmpty()
+                                   && ( actionIt->second->GetId() == ACTIONS::selectSetRect.GetId()
+                                        || actionIt->second->GetId() == ACTIONS::selectSetLasso.GetId() );
+        }
 
         // The toolbar item is toggled before the event is sent, so we check for it not being
         // toggled to see if it was toggled originally
@@ -1229,4 +1233,4 @@ ACTION_TOOLBAR_CONTROL ACTION_TOOLBAR_CONTROLS::bodyStyleSelector( "control.Body
 ACTION_TOOLBAR_CONTROL ACTION_TOOLBAR_CONTROLS::overrideLocks( "control.OverrideLocks",
                                                                _( "Override locks" ),
                                                                _( "Allow moving of locked items with the mouse" ),
-                                                               { FRAME_PCB_EDITOR } );
+                                                               { FRAME_PCB_EDITOR, FRAME_SCH } );

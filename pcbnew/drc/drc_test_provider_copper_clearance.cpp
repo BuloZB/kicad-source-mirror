@@ -34,7 +34,7 @@
 #include <geometry/seg.h>
 #include <geometry/shape_poly_set.h>
 #include <geometry/shape_segment.h>
-#include <geometry/packed_rtree.h>
+#include <geometry/rtree/packed_rtree.h>
 
 #include <drc/drc_engine.h>
 #include <drc/drc_rtree.h>
@@ -93,6 +93,8 @@ private:
     void testGraphicClearances();
 
     void testZonesToZones();
+
+    void testTeardropClearances();
 
     void testItemAgainstZone( BOARD_ITEM* aItem, ZONE* aZone, PCB_LAYER_ID aLayer );
 
@@ -172,6 +174,11 @@ bool DRC_TEST_PROVIDER_COPPER_CLEARANCE::Run()
             return false;   // DRC cancelled
 
         testZonesToZones();
+
+        if( !reportPhase( _( "Checking teardrop clearances..." ) ) )
+            return false; // DRC cancelled
+
+        testTeardropClearances();
     }
     else if( !m_drcEngine->IsErrorLimitExceeded( DRCE_ZONES_INTERSECT ) )
     {
@@ -937,6 +944,9 @@ void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testPadClearances( )
 
                 for( PAD* pad : footprint->Pads() )
                 {
+                    // Through-hole pads are tested per-layer, so overlapping TH pads
+                    // may produce one violation per shared copper layer. This is
+                    // intentional for parallelized DRC to avoid cross-layer shared state.
                     for( PCB_LAYER_ID layer : LSET( pad->GetLayerSet() & boardCopperLayers ) )
                     {
                         if( m_drcEngine->IsCancelled() )
@@ -1161,6 +1171,45 @@ void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testGraphicClearances()
 }
 
 
+void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testTeardropClearances()
+{
+    LSET boardCopperLayers = LSET::AllCuMask( m_board->GetCopperLayerCount() );
+
+    for( ZONE* teardrop : m_board->m_DRCCopperZones )
+    {
+        if( !teardrop->IsTeardropArea() )
+            continue;
+
+        for( PCB_LAYER_ID layer : LSET( teardrop->GetLayerSet() & boardCopperLayers ) )
+        {
+            if( m_drcEngine->IsCancelled() )
+                return;
+
+            auto zoneIt = m_board->m_DRCCopperZonesByLayer.find( layer );
+
+            if( zoneIt == m_board->m_DRCCopperZonesByLayer.end() )
+                continue;
+
+            for( ZONE* zone : zoneIt->second )
+            {
+                if( zone == teardrop )
+                    continue;
+
+                // For teardrop-vs-teardrop pairs, use pointer ordering so each
+                // pair is tested only once.
+                if( zone->IsTeardropArea() && zone < teardrop )
+                    continue;
+
+                testItemAgainstZone( teardrop, zone, layer );
+
+                if( m_drcEngine->IsCancelled() )
+                    return;
+            }
+        }
+    }
+}
+
+
 void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testZonesToZones()
 {
     using SEG_RTREE = KIRTREE::PACKED_RTREE<size_t, int, 2>;
@@ -1287,6 +1336,10 @@ void DRC_TEST_PROVIDER_COPPER_CLEARANCE::testZonesToZones()
     for ( size_t ii = 0; ii < m_board->m_DRCCopperZones.size(); ii++ )
     {
         ZONE* zone = m_board->m_DRCCopperZones[ii];
+
+        // Teardrop areas are tested as tracks, not zones
+        if( zone->IsTeardropArea() )
+            continue;
 
         for( PCB_LAYER_ID layer : zone->GetLayerSet() )
         {
