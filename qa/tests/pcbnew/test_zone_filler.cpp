@@ -1633,3 +1633,405 @@ BOOST_FIXTURE_TEST_CASE( RegressionDiffNetOverlappingZones, ZONE_FILL_TEST_FIXTU
     runAreaLossCheck( false );
     runAreaLossCheck( true );
 }
+
+
+/**
+ * Test for issue 23535: Thermal relief spokes should not extend into areas knocked out
+ * by higher-priority zones on different nets.
+ *
+ * The test board has:
+ * - A GND zone (priority 0) covering x=0..12mm
+ * - A VCC zone (priority 1) covering x=8..20mm
+ * - An SMD pad at (6.5, 5) on net GND with thermal relief connection
+ *
+ * The VCC zone knockout removes GND copper from roughly x=7.5 onward (VCC boundary at
+ * x=8 minus 0.5mm clearance).  The pad's thermal gap extends to x=7.75 on the right
+ * side.  Without the fix, a right-pointing thermal spoke is incorrectly kept because
+ * the spoke endpoint test area does not account for zone-to-zone clearances.  This
+ * leaves a stub of copper in the thermal gap that does not connect to zone copper.
+ */
+BOOST_FIXTURE_TEST_CASE( RegressionThermalReliefsToNowhere, ZONE_FILL_TEST_FIXTURE )
+{
+    ADVANCED_CFG& cfg = const_cast<ADVANCED_CFG&>( ADVANCED_CFG::GetCfg() );
+    bool originalIterativeRefill = cfg.m_ZoneFillIterativeRefill;
+    cfg.m_ZoneFillIterativeRefill = true;
+
+    struct ScopeGuard { bool& ref; bool orig; ~ScopeGuard() { ref = orig; } }
+        guard{ cfg.m_ZoneFillIterativeRefill, originalIterativeRefill };
+
+    KI_TEST::LoadBoard( m_settingsManager, "issue23535_minimal/issue23535_minimal", m_board );
+
+    KI_TEST::FillZones( m_board.get() );
+
+    ZONE* gndZone = nullptr;
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        if( zone->GetNetname() == "GND" )
+            gndZone = zone;
+    }
+
+    BOOST_REQUIRE( gndZone );
+    BOOST_REQUIRE( gndZone->HasFilledPolysForLayer( F_Cu ) );
+
+    const std::shared_ptr<SHAPE_POLY_SET>& gndFill = gndZone->GetFilledPolysList( F_Cu );
+
+    // The pad is at (6.5mm, 5mm) with size 1.5mm and thermal gap 0.5mm.
+    // The right edge of the pad is at x=7.25mm, thermal gap extends to x=7.75mm.
+    // After zone knockout, GND fill stops at roughly x=7.5mm.
+    //
+    // A thermal-relief-to-nowhere spoke would create copper at a point inside the
+    // thermal gap but past the zone fill boundary.  Check a point at (7.4mm, 5mm)
+    // which is in the thermal gap (x > 7.25) and near the knockout edge.
+    VECTOR2I spokeTestPoint( pcbIUScale.mmToIU( 7.4 ), pcbIUScale.mmToIU( 5.0 ) );
+
+    bool hasSpokeToNowhere = gndFill->Contains( spokeTestPoint );
+
+    BOOST_CHECK_MESSAGE( !hasSpokeToNowhere,
+                         "GND zone fill contains copper at the thermal gap test point (7.4, 5.0), "
+                         "indicating a thermal relief spoke to nowhere (issue 23535)." );
+
+    // Also verify that the left-pointing spoke still connects properly.
+    // A point at (5.6mm, 5mm) is in the thermal gap on the left side and should have
+    // copper from a valid left-pointing spoke.
+    VECTOR2I validSpokePoint( pcbIUScale.mmToIU( 5.6 ), pcbIUScale.mmToIU( 5.0 ) );
+
+    bool hasValidSpoke = gndFill->Contains( validSpokePoint );
+
+    BOOST_CHECK_MESSAGE( hasValidSpoke,
+                         "GND zone fill does not contain copper at the valid spoke test point "
+                         "(5.6, 5.0). The fix may have incorrectly removed valid spokes." );
+}
+
+
+/**
+ * Test for issue 23380: Teardrops on off-center tracks should be approximately symmetric
+ * about the track axis.
+ *
+ * When a track connects to a pad off-center (not through the pad center), the teardrop shape
+ * should still flare out symmetrically from the track. Before the fix, the teardrop axis was
+ * computed from the track to the pad center, causing the clipping rectangle (and thus the
+ * anchor points) to be skewed relative to the track path.
+ */
+BOOST_FIXTURE_TEST_CASE( OffCenterTeardropSymmetry, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "off_center_teardrop", m_board );
+
+    TOOL_MANAGER toolMgr;
+    toolMgr.SetEnvironment( m_board.get(), nullptr, nullptr, nullptr, nullptr );
+
+    KI_TEST::DUMMY_TOOL* dummyTool = new KI_TEST::DUMMY_TOOL();
+    toolMgr.RegisterTool( dummyTool );
+
+    BOARD_COMMIT commit( dummyTool );
+    TEARDROP_MANAGER teardropMgr( m_board.get(), &toolMgr );
+    teardropMgr.UpdateTeardrops( commit, nullptr, nullptr, true );
+
+    if( !commit.Empty() )
+        commit.Push( _( "Add teardrops" ), SKIP_UNDO | SKIP_SET_DIRTY );
+
+    // The test board has a 3mm circle pad at (100, 100) with a 0.25mm track connecting
+    // at (100.75, 99) heading to (115, 99). The track enters the pad off-center: 1mm above
+    // and 0.75mm right of center. The teardrop should be approximately symmetric about the
+    // track's axis (the line from ~(100.75, 99) toward (115, 99), i.e., horizontal).
+
+    int teardropCount = 0;
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        if( !zone->IsTeardropArea() )
+            continue;
+
+        teardropCount++;
+
+        const SHAPE_POLY_SET* outline = zone->Outline();
+
+        if( !outline || outline->OutlineCount() == 0 )
+            continue;
+
+        const SHAPE_LINE_CHAIN& chain = outline->Outline( 0 );
+
+        // The track axis is approximately at Y=99mm (in board coordinates = 99 * 1e6 nm).
+        // Measure the maximum extent above and below this axis across all teardrop vertices.
+        int trackY = pcbIUScale.mmToIU( 99 );
+        int maxAbove = 0;
+        int maxBelow = 0;
+
+        for( int i = 0; i < chain.PointCount(); i++ )
+        {
+            int dy = chain.CPoint( i ).y - trackY;
+
+            if( dy < 0 )
+                maxAbove = std::max( maxAbove, -dy );
+            else
+                maxBelow = std::max( maxBelow, dy );
+        }
+
+        // Both sides should have some extent (the teardrop flares out on both sides)
+        BOOST_CHECK_MESSAGE( maxAbove > 0 && maxBelow > 0,
+                             "Teardrop should extend on both sides of the track axis" );
+
+        if( maxAbove > 0 && maxBelow > 0 )
+        {
+            // The two sides should be approximately equal. Allow 30% asymmetry tolerance
+            // to account for polygon approximation of the circular pad and convex hull rounding.
+            double ratio = static_cast<double>( std::min( maxAbove, maxBelow ) )
+                         / static_cast<double>( std::max( maxAbove, maxBelow ) );
+
+            BOOST_CHECK_MESSAGE( ratio > 0.7,
+                                 wxString::Format( "Teardrop asymmetry ratio %.2f is too low "
+                                                   "(above=%d, below=%d). Expected roughly "
+                                                   "symmetric about the track axis.",
+                                                   ratio, maxAbove, maxBelow ) );
+        }
+    }
+
+    BOOST_CHECK_MESSAGE( teardropCount > 0, "Expected at least one teardrop zone for off-center track" );
+}
+
+
+/**
+ * Test for issue 23515: Zone fills have random pieces missing near keepout boundaries.
+ *
+ * The test board is a reporter-provided v9 board file with stored zone fill from the v9
+ * algorithm.  That stored fill is the oracle.  Re-filling the same board with the current
+ * algorithm should not lose noticeable area near keepout boundaries.
+ */
+BOOST_FIXTURE_TEST_CASE( RegressionKeepoutBoundaryMissingFill, ZONE_FILL_TEST_FIXTURE )
+{
+    ADVANCED_CFG& cfg = const_cast<ADVANCED_CFG&>( ADVANCED_CFG::GetCfg() );
+    bool originalIterativeRefill = cfg.m_ZoneFillIterativeRefill;
+
+    struct ScopeGuard { bool& ref; bool orig; ~ScopeGuard() { ref = orig; } }
+        guard{ cfg.m_ZoneFillIterativeRefill, originalIterativeRefill };
+
+    auto getTotalFilledArea =
+            [this]() -> double
+            {
+                double totalArea = 0;
+
+                for( ZONE* zone : m_board->Zones() )
+                {
+                    if( zone->GetIsRuleArea() )
+                        continue;
+
+                    for( PCB_LAYER_ID layer : zone->GetLayerSet().Seq() )
+                    {
+                        if( !zone->HasFilledPolysForLayer( layer ) )
+                            continue;
+
+                        std::shared_ptr<SHAPE_POLY_SET> fill = zone->GetFilledPolysList( layer );
+
+                        if( fill )
+                            totalArea += std::abs( fill->Area() );
+                    }
+                }
+
+                return totalArea;
+            };
+
+    auto refillAndMeasure =
+            [this, &cfg, &getTotalFilledArea]( bool aIterative ) -> double
+            {
+                cfg.m_ZoneFillIterativeRefill = aIterative;
+
+                KI_TEST::LoadBoard( m_settingsManager, "issue23515/issue23515", m_board );
+
+                double storedArea = getTotalFilledArea();
+
+                BOOST_REQUIRE_MESSAGE( storedArea > 0, "Stored v9 fill has zero area" );
+
+                KI_TEST::FillZones( m_board.get() );
+                return getTotalFilledArea();
+            };
+
+    KI_TEST::LoadBoard( m_settingsManager, "issue23515/issue23515", m_board );
+
+    double storedArea = getTotalFilledArea();
+
+    BOOST_REQUIRE_MESSAGE( storedArea > 0, "Stored v9 fill has zero area" );
+
+    double nonIterativeArea = refillAndMeasure( false );
+    double iterativeArea = refillAndMeasure( true );
+    double nonIterativeAreaRatio = nonIterativeArea / storedArea;
+    double iterativeAreaRatio = iterativeArea / storedArea;
+
+    BOOST_CHECK_MESSAGE(
+            nonIterativeAreaRatio > 0.99999,
+            wxString::Format(
+                    "Non-iterative refill lost %.4f%% versus stored v9 fill "
+                    "(stored=%.2f mm^2, non-iterative=%.2f mm^2). "
+                    "This suggests missing pieces near keepout boundaries (issue 23515).",
+                    ( 1.0 - nonIterativeAreaRatio ) * 100.0,
+                    storedArea / 1e6, nonIterativeArea / 1e6 ) );
+
+    BOOST_CHECK_MESSAGE(
+            iterativeAreaRatio > 0.99999,
+            wxString::Format(
+                    "Iterative refill lost %.4f%% versus stored v9 fill "
+                    "(stored=%.2f mm^2, iterative=%.2f mm^2). "
+                    "This suggests missing pieces near keepout boundaries (issue 23515).",
+                    ( 1.0 - iterativeAreaRatio ) * 100.0,
+                    storedArea / 1e6, iterativeArea / 1e6 ) );
+}
+
+
+/**
+ * Test for issue 23516: Vias in hatched fill zones should respect the zone connection
+ * setting (FULL vs THERMAL). Before this fix, thermal relief was always forced on all
+ * vias in hatch-fill zones regardless of the zone's "Pad connections" setting.
+ *
+ * With FULL connection, the zone fill should touch the via directly.
+ * With THERMAL connection, the fill is cut away around the via with a thermal gap.
+ */
+BOOST_FIXTURE_TEST_CASE( HatchZoneViaConnectionRespectsSetting, ZONE_FILL_TEST_FIXTURE )
+{
+    m_board = std::make_unique<BOARD>();
+
+    // Two-layer board is sufficient for this test
+    m_board->SetCopperLayerCount( 2 );
+
+    BOARD_DESIGN_SETTINGS& bds = m_board->GetDesignSettings();
+    bds.SetCopperLayerCount( 2 );
+
+    bds.m_MinClearance = pcbIUScale.mmToIU( 0.2 );
+
+    // Add a GND net
+    NETINFO_ITEM* gndNet = new NETINFO_ITEM( m_board.get(), wxT( "GND" ) );
+    m_board->Add( gndNet );
+    int gndNetCode = gndNet->GetNetCode();
+
+    // Via dimensions: 2.0mm diameter, 1.0mm drill - large enough to span multiple hatch cells
+    // so the via always touches webbing lines regardless of position within the hatch grid.
+    int viaDiam  = pcbIUScale.mmToIU( 2.0 );
+    int viaDrill = pcbIUScale.mmToIU( 1.0 );
+
+    // Hatch zone parameters: 0.5mm gap, 0.3mm thickness.  The via (radius=1.0mm) is wider
+    // than the gap, so it will always intersect webbing in FULL mode.  The thermal gap
+    // (0.5mm) makes the knockout circle radius = 1.0+0.5 = 1.5mm.
+    int hatchGap       = pcbIUScale.mmToIU( 0.5 );
+    int hatchThickness = pcbIUScale.mmToIU( 0.3 );
+
+    // Via center at 10mm,10mm (middle of the zone)
+    VECTOR2I viaPos( pcbIUScale.mmToIU( 10 ), pcbIUScale.mmToIU( 10 ) );
+
+    auto makeVia =
+            [&]() -> PCB_VIA*
+            {
+                PCB_VIA* via = new PCB_VIA( m_board.get() );
+                via->SetPosition( viaPos );
+                via->SetLayerPair( F_Cu, B_Cu );
+                via->SetDrill( viaDrill );
+                via->SetWidth( PADSTACK::ALL_LAYERS, viaDiam );
+                via->SetNetCode( gndNetCode );
+                m_board->Add( via );
+                return via;
+            };
+
+    auto makeHatchZone =
+            [&]( ZONE_CONNECTION aConnection ) -> ZONE*
+            {
+                ZONE* zone = new ZONE( m_board.get() );
+                zone->SetLayer( F_Cu );
+                zone->SetNetCode( gndNetCode );
+                zone->SetFillMode( ZONE_FILL_MODE::HATCH_PATTERN );
+                zone->SetHatchGap( hatchGap );
+                zone->SetHatchThickness( hatchThickness );
+                zone->SetPadConnection( aConnection );
+                zone->SetMinThickness( pcbIUScale.mmToIU( 0.2 ) );
+                zone->SetThermalReliefGap( pcbIUScale.mmToIU( 0.5 ) );
+                zone->SetThermalReliefSpokeWidth( pcbIUScale.mmToIU( 0.5 ) );
+
+                SHAPE_POLY_SET outline;
+                outline.NewOutline();
+                outline.Append( VECTOR2I( pcbIUScale.mmToIU( 1 ), pcbIUScale.mmToIU( 1 ) ) );
+                outline.Append( VECTOR2I( pcbIUScale.mmToIU( 19 ), pcbIUScale.mmToIU( 1 ) ) );
+                outline.Append( VECTOR2I( pcbIUScale.mmToIU( 19 ), pcbIUScale.mmToIU( 19 ) ) );
+                outline.Append( VECTOR2I( pcbIUScale.mmToIU( 1 ), pcbIUScale.mmToIU( 19 ) ) );
+                zone->AddPolygon( outline.COutline( 0 ) );
+
+                m_board->Add( zone );
+                return zone;
+            };
+
+    auto initDRC =
+            [&]()
+            {
+                m_board->BuildConnectivity();
+                auto drcEngine = std::make_shared<DRC_ENGINE>( m_board.get(), &bds );
+                drcEngine->InitEngine( wxFileName() );
+                bds.m_DRCEngine = drcEngine;
+            };
+
+    // The thermal relief adds a circular ring around the via that covers hatch holes which
+    // would otherwise be open.  With viaRadius=1.0mm, thermalGap=0.5mm, spokeWidth=0.5mm:
+    //   ring outer radius = 1.75mm, inner radius = 1.25mm
+    //   ring area added inside hatch holes > knockout area removed from webbing
+    //   net result: THERMAL fill area > FULL fill area by ~0.4 sq mm
+    // FULL connection skips both the knockout and the ring addition, so the THERMAL fill
+    // should be measurably larger than the FULL fill.
+
+    double fullFillArea    = 0.0;
+    double thermalFillArea = 0.0;
+
+    // Test 1: FULL connection
+    {
+        PCB_VIA* via  = makeVia();
+        ZONE*    zone = makeHatchZone( ZONE_CONNECTION::FULL );
+
+        initDRC();
+        KI_TEST::FillZones( m_board.get() );
+
+        BOOST_REQUIRE_MESSAGE( zone->HasFilledPolysForLayer( F_Cu ),
+                               "Zone should have fill on F.Cu with FULL connection" );
+
+        const std::shared_ptr<SHAPE_POLY_SET>& fill = zone->GetFilledPolysList( F_Cu );
+
+        for( int i = 0; i < fill->OutlineCount(); i++ )
+            fullFillArea += std::abs( fill->Outline( i ).Area() );
+
+        m_board->Remove( via );
+        m_board->Remove( zone );
+        delete via;
+        delete zone;
+    }
+
+    // Test 2: THERMAL connection
+    {
+        PCB_VIA* via  = makeVia();
+        ZONE*    zone = makeHatchZone( ZONE_CONNECTION::THERMAL );
+
+        initDRC();
+        KI_TEST::FillZones( m_board.get() );
+
+        BOOST_REQUIRE_MESSAGE( zone->HasFilledPolysForLayer( F_Cu ),
+                               "Zone should have fill on F.Cu with THERMAL connection" );
+
+        const std::shared_ptr<SHAPE_POLY_SET>& fill = zone->GetFilledPolysList( F_Cu );
+
+        for( int i = 0; i < fill->OutlineCount(); i++ )
+            thermalFillArea += std::abs( fill->Outline( i ).Area() );
+
+        m_board->Remove( via );
+        m_board->Remove( zone );
+        delete via;
+        delete zone;
+    }
+
+    // The THERMAL fill should have more area than the FULL fill because a thermal ring was
+    // added around the via, filling hatch holes that would otherwise be open.
+    // Use a 0.2 sq mm threshold to avoid sensitivity to small edge effects.
+    double iuPerMM       = pcbIUScale.IU_PER_MM;
+    double areaThreshold = 0.2 * iuPerMM * iuPerMM;  // 0.2 sq mm in IU^2
+
+    double areaIU2toMM2 = 1.0 / ( iuPerMM * iuPerMM );
+
+    BOOST_CHECK_MESSAGE( thermalFillArea > fullFillArea + areaThreshold,
+                         wxString::Format(
+                                 "THERMAL connection fill area (%.2f sq mm) should be larger "
+                                 "than FULL fill area (%.2f sq mm) by at least 0.2 sq mm. "
+                                 "If they are equal or FULL is larger, thermal ring was not "
+                                 "added for THERMAL connection, or thermal ring was incorrectly "
+                                 "added for FULL connection (issue 23516 regression).",
+                                 thermalFillArea * areaIU2toMM2, fullFillArea * areaIU2toMM2 ) );
+}

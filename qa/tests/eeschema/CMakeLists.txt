@@ -86,6 +86,7 @@ set( QA_EESCHEMA_SRCS
     test_issue23143_junction_midpoint.cpp
     test_issue23403_shared_subsheet_screen.cpp
     test_issue22576_subsheet_standalone.cpp
+    test_issue22694_global_hier_label.cpp
     test_issue16915_bus_netclass.cpp
     test_nc_pin_connectivity.cpp
     test_crossing_label.cpp
@@ -135,6 +136,7 @@ set( QA_EESCHEMA_SRCS
     test_pin_text_overlap.cpp
     test_remote_symbol_download_security.cpp
     test_remote_symbol_import.cpp
+    test_remote_symbol_load_from_payload.cpp
     test_netlist_exporter_xml_stacked.cpp
     test_resolve_drivers.cpp
     test_saveas_copy_subsheets.cpp

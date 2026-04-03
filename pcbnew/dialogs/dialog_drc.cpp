@@ -354,6 +354,12 @@ void DIALOG_DRC::OnRunDRCClick( wxCommandEvent& aEvent )
         return;
     }
 
+    m_footprintTestsRun = false;
+    m_cancelled = false;
+
+    m_frame->GetBoard()->RecordDRCExclusions();
+    deleteAllMarkers( true );
+
     // This is not the time to have stale or buggy rules.  Ensure they're up-to-date
     // and that they at least parse.
     try
@@ -379,12 +385,6 @@ void DIALOG_DRC::OnRunDRCClick( wxCommandEvent& aEvent )
         KIPLATFORM::UI::SetFloatLevel( this );
         return;
     }
-
-    m_footprintTestsRun = false;
-    m_cancelled = false;
-
-    m_frame->GetBoard()->RecordDRCExclusions();
-    deleteAllMarkers( true );
 
     std::vector<std::reference_wrapper<RC_ITEM>> violations = DRC_ITEM::GetItemsWithSeverities();
     m_ignoredList->DeleteAllItems();
@@ -785,14 +785,14 @@ void DIALOG_DRC::OnDRCItemRClick( wxDataViewEvent& aEvent )
         menu.Append( ID_SET_SEVERITY_TO_ERROR,
                      wxString::Format( _( "Change severity to Error for all '%s' violations" ),
                                        rcItem->GetErrorText( true ) ),
-                     _( "Violation severities can also be edited in the Board Setup... dialog" ) );
+                     _( "Violation severities can also be edited in Board Setup" ) );
     }
     else
     {
         menu.Append( ID_SET_SEVERITY_TO_WARNING,
                      wxString::Format( _( "Change severity to Warning for all '%s' violations" ),
                                        rcItem->GetErrorText( true ) ),
-                     _( "Violation severities can also be edited in the Board Setup... dialog" ) );
+                     _( "Violation severities can also be edited in Board Setup" ) );
     }
 
     menu.Append( ID_SET_SEVERITY_TO_IGNORE,
@@ -803,7 +803,7 @@ void DIALOG_DRC::OnDRCItemRClick( wxDataViewEvent& aEvent )
 
     menu.Append( ID_EDIT_SEVERITIES,
                  _( "Edit violation severities..." ),
-                 _( "Open the Board Setup... dialog" ) );
+                 _( "Open the Board Setup dialog" ) );
 
     bool modified = false;
     int  command = GetPopupMenuSelectionFromUser( menu );

@@ -255,6 +255,7 @@ if( APPLE )
     if( KICAD_USE_SENTRY )
         install( FILES $<TARGET_FILE:crashpad_handler>
             DESTINATION ${OSX_BUNDLE_INSTALL_BIN_DIR}
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
             COMPONENT binary
             )
     endif()
@@ -286,6 +287,8 @@ if( APPLE )
 
         if( ${KICAD_USE_SENTRY} )
             file( REMOVE_RECURSE ${OSX_BUNDLE_INSTALL_BIN_DIR}/crashpad_handler.dSYM )
+            file( REMOVE_RECURSE ${KICAD_BIN}/bin )
+            file( REMOVE_RECURSE ${KICAD_BIN}/lib )
         endif()
 
         cmake_policy( SET CMP0012 NEW )

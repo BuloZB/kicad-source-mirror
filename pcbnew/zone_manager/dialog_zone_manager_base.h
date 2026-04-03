@@ -59,6 +59,7 @@ class DIALOG_ZONE_MANAGER_BASE : public DIALOG_SHIM
 		STD_BITMAP_BUTTON* m_btnMoveUp;
 		STD_BITMAP_BUTTON* m_btnMoveDown;
 		STD_BITMAP_BUTTON* m_btnMoveBottom;
+		STD_BITMAP_BUTTON* m_btnAutoAssign;
 		wxPanel* m_zonePanel;
 		wxBoxSizer* m_rightColumn;
 		wxBoxSizer* m_sizerProperties;
@@ -86,6 +87,7 @@ class DIALOG_ZONE_MANAGER_BASE : public DIALOG_SHIM
 		virtual void OnMoveUpClick( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMoveDownClick( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMoveBottomClick( wxCommandEvent& event ) { event.Skip(); }
+		virtual void OnAutoAssignClick( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnUpdateDisplayedZonesClick( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnOk( wxCommandEvent& event ) { event.Skip(); }
 
