@@ -174,7 +174,7 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
     m_infoBar->Dismiss();
 
     if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
-        statusBar->ClearLoadWarningMessages();
+        statusBar->ClearWarningMessages( "load" );
 
     WX_PROGRESS_REPORTER progressReporter( this, is_new ? _( "Create Schematic" )
                                                         : _( "Load Schematic" ), 1,
@@ -421,7 +421,7 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
 
             // Show any messages collected before the failure
             if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
-                statusBar->SetLoadWarningMessages( loadReporter.GetMessages() );
+                statusBar->AddWarningMessages( "load", loadReporter.GetMessages() );
 
             msg.Printf( _( "Failed to load '%s'." ), fullFileName );
             SetMsgPanel( wxEmptyString, msg );
@@ -452,7 +452,7 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
         UpdateFileHistory( fullFileName );
 
         if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
-            statusBar->SetLoadWarningMessages( loadReporter.GetMessages() );
+            statusBar->AddWarningMessages( "load", loadReporter.GetMessages() );
 
         SCH_SCREENS schematic( Schematic().Root() );
 
@@ -781,6 +781,14 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
     TestDanglingEnds();
 
     UpdateHierarchyNavigator( false, true );
+    CallAfter(
+            [this]()
+            {
+                if( m_netNavigator && m_netNavigator->IsEmpty() )
+                {
+                    RefreshNetNavigator();
+                }
+            } );
 
     wxCommandEvent changedEvt( EDA_EVT_SCHEMATIC_CHANGED );
     ProcessEventLocally( changedEvt );
@@ -1454,7 +1462,7 @@ bool SCH_EDIT_FRAME::importFile( const wxString& aFileName, int aFileType,
     ProcessEventLocally( changingEvt );
 
     if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
-        statusBar->ClearLoadWarningMessages();
+        statusBar->ClearWarningMessages( "load" );
 
     WX_STRING_REPORTER loadReporter;
     LOAD_INFO_REPORTER_SCOPE loadReporterScope( &loadReporter );
@@ -1578,6 +1586,14 @@ bool SCH_EDIT_FRAME::importFile( const wxString& aFileName, int aFileType,
         SyncView();
 
         UpdateHierarchyNavigator( false, true );
+        CallAfter(
+                [this]()
+                {
+                    if( m_netNavigator && m_netNavigator->IsEmpty() )
+                    {
+                        RefreshNetNavigator();
+                    }
+                } );
 
         wxCommandEvent e( EDA_EVT_SCHEMATIC_CHANGED );
         ProcessEventLocally( e );
@@ -1599,7 +1615,7 @@ bool SCH_EDIT_FRAME::importFile( const wxString& aFileName, int aFileType,
         updateTitle();
 
         if( KISTATUSBAR* statusBar = dynamic_cast<KISTATUSBAR*>( GetStatusBar() ) )
-            statusBar->SetLoadWarningMessages( loadReporter.GetMessages() );
+            statusBar->AddWarningMessages( "load", loadReporter.GetMessages() );
 
         break;
     }

@@ -30,6 +30,7 @@
 #include <font/fontconfig.h>
 #include <reporter.h>
 
+#include <ranges>
 #include <wx/filename.h>
 #include <wx/wfstream.h>
 
@@ -40,7 +41,11 @@ PCB_IO_SPRINT_LAYOUT::PCB_IO_SPRINT_LAYOUT() :
 }
 
 
-PCB_IO_SPRINT_LAYOUT::~PCB_IO_SPRINT_LAYOUT() = default;
+PCB_IO_SPRINT_LAYOUT::~PCB_IO_SPRINT_LAYOUT()
+{
+    for( std::unique_ptr<FOOTPRINT>& fp : m_loadedFootprints | std::views::values )
+        fp->SetParent( nullptr );
+}
 
 
 bool PCB_IO_SPRINT_LAYOUT::CanReadBoard( const wxString& aFileName ) const

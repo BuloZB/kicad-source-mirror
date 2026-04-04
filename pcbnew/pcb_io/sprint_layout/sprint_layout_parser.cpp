@@ -533,8 +533,9 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard(
 
                 wxString fpKey = wxString::Format( wxS( "SprintLayout_%s" ),
                                                    wxString::FromUTF8( obj.text ) );
-                aFootprintMap[fpKey] = std::unique_ptr<FOOTPRINT>(
-                        static_cast<FOOTPRINT*>( fp->Clone() ) );
+                FOOTPRINT* fpCopy = static_cast<FOOTPRINT*>( fp->Clone() );
+                fpCopy->SetParent( nullptr );
+                aFootprintMap[fpKey] = std::unique_ptr<FOOTPRINT>( fpCopy );
             }
         }
     }

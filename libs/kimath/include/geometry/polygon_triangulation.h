@@ -624,6 +624,14 @@ private:
      */
     bool earcutList( VERTEX* aPoint, int pass = 0 )
     {
+        constexpr int kMaxRecursion = 64;
+
+        if( pass >= kMaxRecursion )
+        {
+            wxLogTrace( TRIANGULATE_TRACE, "earcutList recursion limit reached; aborting triangulation", pass );
+            return false;
+        }
+
         wxLogTrace( TRIANGULATE_TRACE, "earcutList starting at %p for pass %d", aPoint, pass );
 
         if( !aPoint )
@@ -734,7 +742,7 @@ private:
                 // If we don't have any NULL triangles left, cut the polygon in two and try again
                 wxLogTrace( TRIANGULATE_TRACE, "Splitting polygon" );
 
-                if( !splitPolygon( aPoint ) )
+                if( !splitPolygon( aPoint, pass + 1 ) )
                     return false;
 
                 break;
@@ -1102,7 +1110,7 @@ private:
      * independently.  This is assured to generate at least one new ear if the
      * split is successful
      */
-    bool splitPolygon( VERTEX* start )
+    bool splitPolygon( VERTEX* start, int aPass )
     {
         VERTEX* origPoly = start;
 
@@ -1156,7 +1164,8 @@ private:
             overlapPoints[1]->updateList();
             logVertices( overlapPoints[0], nullptr );
             logVertices( overlapPoints[1], nullptr );
-            bool retval = earcutList( overlapPoints[0] ) && earcutList( overlapPoints[1] );
+            bool retval = earcutList( overlapPoints[0], aPass )
+                          && earcutList( overlapPoints[1], aPass );
 
             wxLogTrace( TRIANGULATE_TRACE, "%s at first overlap split", retval ? "Success" : "Failed" );
             return retval;
@@ -1182,7 +1191,7 @@ private:
                     origPoly->updateList();
                     newPoly->updateList();
 
-                    bool retval = earcutList( origPoly ) && earcutList( newPoly );
+                    bool retval = earcutList( origPoly, aPass ) && earcutList( newPoly, aPass );
 
                     wxLogTrace( TRIANGULATE_TRACE, "%s at split", retval ? "Success" : "Failed" );
                     return retval;
