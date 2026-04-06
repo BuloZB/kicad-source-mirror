@@ -29,13 +29,17 @@
 #include <pcb_edit_frame.h>
 #include <pcbnew_settings.h>
 #include <pgm_base.h>
+#include <reporter.h>
 #include <settings/common_settings.h>
 #include <api/api_plugin_manager.h>
+#include <dialog_HTML_reporter_base.h>
 #include <launch_ext.h>
+#include <widgets/kistatusbar.h>
 #include <widgets/grid_icon_text_helpers.h>
 #include <widgets/paged_dialog.h>
 #include <widgets/wx_grid.h>
 #include <widgets/std_bitmap_button.h>
+#include <widgets/wx_html_report_box.h>
 #include <wx/app.h>
 
 
@@ -61,17 +65,27 @@ protected:
 
 void PLUGINS_GRID_TRICKS::showPopupMenu( wxMenu& menu, wxGridEvent& aEvent )
 {
-#ifdef KICAD_IPC_API
-    API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
-    wxString id = m_grid->GetCellValue( m_grid->GetGridCursorRow(),
-                                        PANEL_PCBNEW_ACTION_PLUGINS::COLUMN_SETTINGS_IDENTIFIER );
+    const int clickedRow = aEvent.GetRow();
 
-    if( std::optional<const PLUGIN_ACTION*> action = mgr.GetAction( id ) )
+    if( clickedRow >= 0 )
     {
-        menu.Append( MYID_RECREATE_ENV, _( "Recreate Plugin Environment" ), _( "Recreate Plugin Environment" ) );
-        menu.AppendSeparator();
-    }
+        m_grid->SetGridCursor( clickedRow, m_grid->GetGridCursorCol() );
+        m_grid->ClearSelection();
+        m_grid->SelectRow( clickedRow );
+
+#ifdef KICAD_IPC_API
+        API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
+        wxString id = m_grid->GetCellValue( clickedRow,
+                                            PANEL_PCBNEW_ACTION_PLUGINS::COLUMN_SETTINGS_IDENTIFIER );
+
+        if( std::optional<const PLUGIN_ACTION*> action = mgr.GetAction( id );
+            action && ( *action )->plugin.Runtime().type == PLUGIN_RUNTIME_TYPE::PYTHON )
+        {
+            menu.Append( MYID_RECREATE_ENV, _( "Recreate Plugin Environment" ), _( "Recreate Plugin Environment" ) );
+            menu.AppendSeparator();
+        }
 #endif
+    }
 
     GRID_TRICKS::showPopupMenu( menu, aEvent );
 }
@@ -86,8 +100,11 @@ void PLUGINS_GRID_TRICKS::doPopupSelection( wxCommandEvent& event )
         wxString id = m_grid->GetCellValue( m_grid->GetGridCursorRow(),
                                             PANEL_PCBNEW_ACTION_PLUGINS::COLUMN_SETTINGS_IDENTIFIER );
 
-        if( std::optional<const PLUGIN_ACTION*> action = mgr.GetAction( id ) )
+        if( std::optional<const PLUGIN_ACTION*> action = mgr.GetAction( id );
+            action && ( *action )->plugin.Runtime().type == PLUGIN_RUNTIME_TYPE::PYTHON )
+        {
             mgr.RecreatePluginEnvironment( ( *action )->plugin.Identifier() );
+        }
 #endif
     }
     else
@@ -110,6 +127,9 @@ PANEL_PCBNEW_ACTION_PLUGINS::PANEL_PCBNEW_ACTION_PLUGINS( wxWindow* aParent ) :
     m_reloadButton->SetBitmap( KiBitmapBundle( BITMAPS::small_refresh ) );
     m_showErrorsButton->SetBitmap( KiBitmapBundle( BITMAPS::small_warning ) );
 
+    m_errorDialog = new DIALOG_HTML_REPORTER( aParent );
+    m_allowErrorDialog = false;
+
     wxTheApp->Bind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED,
           &PANEL_PCBNEW_ACTION_PLUGINS::onPluginAvailabilityChanged, this );
 }
@@ -117,6 +137,7 @@ PANEL_PCBNEW_ACTION_PLUGINS::PANEL_PCBNEW_ACTION_PLUGINS( wxWindow* aParent ) :
 
 PANEL_PCBNEW_ACTION_PLUGINS::~PANEL_PCBNEW_ACTION_PLUGINS()
 {
+    delete m_errorDialog;
     wxTheApp->Unbind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED,
             &PANEL_PCBNEW_ACTION_PLUGINS::onPluginAvailabilityChanged, this );
     m_grid->PopEventHandler( true );
@@ -127,6 +148,14 @@ void PANEL_PCBNEW_ACTION_PLUGINS::onPluginAvailabilityChanged( wxCommandEvent& a
 {
     m_grid->Enable();
     TransferDataToWindow();
+
+    if( m_allowErrorDialog && m_errorDialog->m_Reporter->HasMessage() )
+    {
+        m_errorDialog->m_Reporter->Flush();
+        m_allowErrorDialog = false;
+        m_errorDialog->ShowModal();
+    }
+
     aEvt.Skip();
 }
 
@@ -182,7 +211,10 @@ void PANEL_PCBNEW_ACTION_PLUGINS::SwapRows( int aRowA, int aRowB )
 void PANEL_PCBNEW_ACTION_PLUGINS::OnReloadButtonClick( wxCommandEvent& event )
 {
     API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
-    mgr.ReloadPlugins();
+    m_errorDialog->m_Reporter->Clear();
+    auto reporter = std::make_shared<REDIRECT_REPORTER>( m_errorDialog->m_Reporter );
+    m_allowErrorDialog = true;
+    mgr.ReloadPlugins( std::nullopt, reporter );
     m_grid->Disable();
 }
 

@@ -2956,6 +2956,13 @@ int SCH_EDITOR_CONTROL::ShowCvpcb( const TOOL_EVENT& aEvent )
 }
 
 
+int SCH_EDITOR_CONTROL::ImportNonKicadSchematic( const TOOL_EVENT& aEvent )
+{
+    m_frame->OnImportProject();
+    return 0;
+}
+
+
 int SCH_EDITOR_CONTROL::EditSymbolFields( const TOOL_EVENT& aEvent )
 {
     DIALOG_SYMBOL_FIELDS_TABLE* dlg = m_frame->GetSymbolFieldsTableDialog();
@@ -3316,15 +3323,6 @@ int SCH_EDITOR_CONTROL::ToggleAnnotateAuto( const TOOL_EVENT& aEvent )
 }
 
 
-int SCH_EDITOR_CONTROL::ReloadPlugins( const TOOL_EVENT& aEvent )
-{
-#ifdef KICAD_IPC_API
-    if( Pgm().GetCommonSettings()->m_Api.enable_server )
-        Pgm().GetPluginManager().ReloadPlugins();
-#endif
-    return 0;
-}
-
 int SCH_EDITOR_CONTROL::OnAngleSnapModeChanged( const TOOL_EVENT& aEvent )
 {
     // Update the left toolbar Line modes group icon to match current mode
@@ -3475,6 +3473,18 @@ int SCH_EDITOR_CONTROL::RemoveVariant( const TOOL_EVENT& aEvent )
 }
 
 
+int SCH_EDITOR_CONTROL::EditVariantDescription( const TOOL_EVENT& aEvent )
+{
+    SCH_EDIT_FRAME* editFrame = dynamic_cast<SCH_EDIT_FRAME*>( m_frame );
+
+    if( !editFrame )
+        return 1;
+
+    editFrame->EditVariantDescription();
+    return 0;
+}
+
+
 void SCH_EDITOR_CONTROL::setTransitions()
 {
     Go( &SCH_EDITOR_CONTROL::New,                     ACTIONS::doNew.MakeEvent() );
@@ -3524,6 +3534,7 @@ void SCH_EDITOR_CONTROL::setTransitions()
     Go( &SCH_EDITOR_CONTROL::EditWithSymbolEditor,    SCH_ACTIONS::editLibSymbolWithLibEdit.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::ShowCvpcb,               SCH_ACTIONS::assignFootprints.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::ImportFPAssignments,     SCH_ACTIONS::importFPAssignments.MakeEvent() );
+    Go( &SCH_EDITOR_CONTROL::ImportNonKicadSchematic, SCH_ACTIONS::importNonKicadSchematic.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::Annotate,                SCH_ACTIONS::annotate.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::IncrementAnnotations,    SCH_ACTIONS::incrementAnnotations.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::EditSymbolFields,        SCH_ACTIONS::editSymbolFields.MakeEvent() );
@@ -3561,8 +3572,6 @@ void SCH_EDITOR_CONTROL::setTransitions()
     Go( &SCH_EDITOR_CONTROL::OnAngleSnapModeChanged,  SCH_ACTIONS::angleSnapModeChanged.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::ToggleAnnotateAuto,      SCH_ACTIONS::toggleAnnotateAuto.MakeEvent() );
 
-    Go( &SCH_EDITOR_CONTROL::ReloadPlugins,           ACTIONS::pluginsReload.MakeEvent() );
-
     Go( &SCH_EDITOR_CONTROL::ExportSymbolsToLibrary,  SCH_ACTIONS::exportSymbolsToLibrary.MakeEvent() );
 
     Go( &SCH_EDITOR_CONTROL::PlaceLinkedDesignBlock,  SCH_ACTIONS::placeLinkedDesignBlock.MakeEvent() );
@@ -3570,4 +3579,5 @@ void SCH_EDITOR_CONTROL::setTransitions()
 
     Go( &SCH_EDITOR_CONTROL::AddVariant,              SCH_ACTIONS::addVariant.MakeEvent() );
     Go( &SCH_EDITOR_CONTROL::RemoveVariant,           SCH_ACTIONS::removeVariant.MakeEvent() );
+    Go( &SCH_EDITOR_CONTROL::EditVariantDescription, SCH_ACTIONS::editVariantDescription.MakeEvent() );
 }

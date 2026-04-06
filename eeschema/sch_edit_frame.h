@@ -258,6 +258,8 @@ public:
 
     void RemoveVariant();
 
+    void EditVariantDescription();
+
     /**
      * Update the variant name control on the main toolbar.
      *
@@ -966,7 +968,7 @@ private:
     void OnExit( wxCommandEvent& event );
 
     void OnLoadFile( wxCommandEvent& event );
-    void OnImportProject( wxCommandEvent& event );
+    void OnImportProject();
 
     void OnClearFileHistory( wxCommandEvent& aEvent );
 

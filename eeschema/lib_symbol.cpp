@@ -1503,6 +1503,7 @@ void LIB_SYMBOL::SetFields( const std::vector<SCH_FIELD>& aFieldsList )
     m_drawings.sort();
     cacheSearchTerms();
     cacheChooserFields();
+    cacheShownDescription();
 }
 
 
@@ -1825,6 +1826,12 @@ INSPECT_RESULT LIB_SYMBOL::Visit( INSPECTOR aInspector, void* aTestData, const s
 
 void LIB_SYMBOL::SetUnitCount( int aCount, bool aDuplicateDrawItems )
 {
+    // A LIB_SYMBOL must always have at least one unit. Passing a value less than 1 would
+    // erase the mandatory fields (which all have m_unit == 0), leaving the symbol in a
+    // broken state that crashes later when callers dereference GetReferenceField() etc.
+    wxCHECK_RET( aCount >= 1,
+                 wxString::Format( wxT( "Invalid unit count %d, ignoring." ), aCount ) );
+
     if( m_unitCount == aCount )
         return;
 

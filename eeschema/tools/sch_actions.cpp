@@ -1227,6 +1227,13 @@ TOOL_ACTION SCH_ACTIONS::importGraphics( TOOL_ACTION_ARGS()
         .Icon( BITMAPS::import_vector )
         .Flags( AF_ACTIVATE ) );
 
+TOOL_ACTION SCH_ACTIONS::importNonKicadSchematic( TOOL_ACTION_ARGS()
+        .Name( "eeschema.EditorControl.importNonKicadSchematic" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Import Non-KiCad Schematic..." ) )
+        .Tooltip( _( "Replace current schematic sheet with one imported from another application" ) )
+        .Icon( BITMAPS::import_document ) );
+
 TOOL_ACTION SCH_ACTIONS::showPcbNew( TOOL_ACTION_ARGS()
         .Name( "eeschema.EditorControl.showPcbNew" )
         .Scope( AS_GLOBAL )
@@ -1794,5 +1801,11 @@ TOOL_ACTION SCH_ACTIONS::removeVariant( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Remove Design Variant..." ) )
         .Tooltip( _( "Remove an existing design variant from the schematic." ) ) );
+
+TOOL_ACTION SCH_ACTIONS::editVariantDescription( TOOL_ACTION_ARGS()                                                   
+        .Name( "eeschema.EditorControl.editVariantDescription" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Edit Variant Description..." ) )
+        .Tooltip( _( "Edit the description of an existing design variant." ) ) );
 
 // clang-format on
