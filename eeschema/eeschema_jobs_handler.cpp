@@ -172,6 +172,13 @@ EESCHEMA_JOBS_HANDLER::EESCHEMA_JOBS_HANDLER( KIWAY* aKiway ) :
 }
 
 
+void EESCHEMA_JOBS_HANDLER::ClearCachedSchematic()
+{
+    delete m_cliSchematic;
+    m_cliSchematic = nullptr;
+}
+
+
 SCHEMATIC* EESCHEMA_JOBS_HANDLER::getSchematic( const wxString& aPath )
 {
     SCHEMATIC* sch = nullptr;

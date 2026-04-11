@@ -49,6 +49,7 @@
 
 enum SILK_DISPOSITION {
     UNKNOWN = 0,
+    RESOLVING,
     ON_BOARD,
     OFF_BOARD,
     CROSSES_EDGE
@@ -516,7 +517,13 @@ bool DRC_TEST_PROVIDER_EDGE_CLEARANCE::Run()
 
                     {
                         std::lock_guard<std::mutex> lock( m_silkMutex );
-                        needsResolution = m_silkDisposition[item] == UNKNOWN;
+                        auto [it, inserted] = m_silkDisposition.try_emplace( item, RESOLVING );
+
+                        if( inserted || it->second == UNKNOWN )
+                        {
+                            it->second = RESOLVING;
+                            needsResolution = true;
+                        }
                     }
 
                     if( needsResolution && m_board->BoardOutline()->HasOutline() )
@@ -546,7 +553,7 @@ bool DRC_TEST_PROVIDER_EDGE_CLEARANCE::Run()
             break;
         }
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 250 ) );
+        futures.wait_for( std::chrono::milliseconds( 250 ) );
     }
 
     return !m_drcEngine->IsCancelled();

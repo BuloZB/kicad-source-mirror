@@ -376,7 +376,7 @@ bool NGSPICE::IsRunning()
         restoreSignalHandlers();
 
         // Report the crash to the user
-        if( m_reporter )
+        if( SIMULATOR_REPORTER* reporter = m_reporter )
         {
             wxString signalName;
 
@@ -389,7 +389,7 @@ bool NGSPICE::IsRunning()
             default:      signalName = wxString::Format( wxT( "signal %d" ), signal ); break;
             }
 
-            m_reporter->Report( wxString::Format(
+            reporter->Report( wxString::Format(
                     _( "Simulation crashed (%s). This is usually caused by a bug in ngspice "
                        "or an invalid netlist. The simulator will be reset." ),
                     signalName ) );

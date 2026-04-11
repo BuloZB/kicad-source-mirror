@@ -127,6 +127,7 @@ static const std::vector<std::string> VALIDATION_TEST_BOARDS = {
     "issue22798.kicad_pcb",
     "padstacks_complex.kicad_pcb",
     "issue12609.kicad_pcb",
+    "issue22794.kicad_pcb",
 };
 
 } // anonymous namespace
@@ -259,14 +260,12 @@ BOOST_AUTO_TEST_CASE( SurfaceFinishExport )
 
     BOOST_REQUIRE( wxFileExists( tempPath ) );
 
-    // Verify SurfaceFinish element is present with correct type
-    // Upstream uses nested structure: <SurfaceFinish><Finish type="ENIG-N"/></SurfaceFinish>
+    // Verify SurfaceFinish element is present with correct type attribute
+    // Schema requires: <SurfaceFinish type="ENIG-N"/>
     BOOST_CHECK_MESSAGE( FileContainsPattern( tempPath, wxT( "<SurfaceFinish" ) ),
                          "SurfaceFinish element should be present" );
-    BOOST_CHECK_MESSAGE( FileContainsPattern( tempPath, wxT( "<Finish" ) ),
-                         "Finish element should be present" );
     BOOST_CHECK_MESSAGE( FileContainsPattern( tempPath, wxT( "type=\"ENIG-N\"" ) ),
-                         "Finish type should be ENIG-N" );
+                         "SurfaceFinish type should be ENIG-N" );
 
     // Verify coating layers are present
     BOOST_CHECK_MESSAGE( FileContainsPattern( tempPath, wxT( "COATING_TOP" ) ),

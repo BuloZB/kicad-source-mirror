@@ -1656,7 +1656,7 @@ void VIEW::UpdateItems()
         }
     }
 
-    KI_TRACE( traceGalProfile, wxS( "View update: total items %u, geom %u anyUpdated %u\n" ),
+    wxLogTrace( traceGalProfile, wxS( "View update: total items %u, geom %u anyUpdated %u" ),
               cntTotal, cntGeomUpdate, (unsigned) anyUpdated );
 
     m_hasPendingItemUpdates = false;
@@ -1872,3 +1872,4 @@ void VIEW::ShowPreview( bool aShow )
 
 
 } // namespace KIGFX
+

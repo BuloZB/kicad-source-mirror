@@ -66,12 +66,12 @@ def test_sch_export_svg( kitest: KiTestFixture,
 
     png_converted_from_svg_path = output_svg_path.with_suffix( '.png' )
 
-    cairosvg.svg2png( url=str( output_svg_path ), write_to=str( png_converted_from_svg_path ), dpi=1200 )
+    cairosvg.svg2png( url=str( output_svg_path ), write_to=str( png_converted_from_svg_path ), dpi=600 )
 
     compare_file_path = kitest.get_data_file_path( compare_fn )
     compare_stem = f"orig_{output_dir}"
     compare_png_converted_from_svg_path = output_svg_path.with_suffix( '.png' ).with_stem(compare_stem)
-    cairosvg.svg2png( url=str( compare_file_path ), write_to=str( compare_png_converted_from_svg_path ), dpi=1200 )
+    cairosvg.svg2png( url=str( compare_file_path ), write_to=str( compare_png_converted_from_svg_path ), dpi=600 )
 
     assert utils.images_are_equal( png_converted_from_svg_path, compare_png_converted_from_svg_path,
                                    diff_handler=kitest.add_attachment )

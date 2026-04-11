@@ -435,12 +435,26 @@ BOOST_AUTO_TEST_CASE( PrintBusForUIHandlesMixedFormatting )
     // Test that PrintBusForUI handles both super/sub/overbar formatting and escaped spaces
 
     // Overbar formatting only
-    BOOST_CHECK_EQUAL( SCH_CONNECTION::PrintBusForUI( wxS( "~{reset}" ) ),
-                       wxS( "reset" ) );
+    BOOST_CHECK_EQUAL( SCH_CONNECTION::PrintBusForUI( wxS( "~{reset}" ) ), wxS( "~reset" ) );
 
     // Both overbar and escaped space
-    BOOST_CHECK_EQUAL( SCH_CONNECTION::PrintBusForUI( wxS( "my\\ ~{signal}" ) ),
-                       wxS( "my signal" ) );
+    BOOST_CHECK_EQUAL( SCH_CONNECTION::PrintBusForUI( wxS( "my\\ ~{signal}" ) ), wxS( "my ~signal" ) );
+}
+
+
+BOOST_AUTO_TEST_CASE( ParsesOverbarWrappingNameAndRange )
+{
+    // Regression test for issue #23827: ~{BE[0..3]} where the overbar wraps
+    // both the signal name and the range must produce ~{BE0}, ~{BE1}, etc.
+    wxString              name;
+    std::vector<wxString> members;
+
+    BOOST_CHECK( NET_SETTINGS::ParseBusVector( wxS( "~{BE[0..3]}" ), &name, &members ) );
+    BOOST_CHECK_EQUAL( name, wxS( "~{BE" ) );
+
+    std::vector<wxString> expected = { wxS( "~{BE0}" ), wxS( "~{BE1}" ), wxS( "~{BE2}" ), wxS( "~{BE3}" ) };
+
+    BOOST_CHECK_EQUAL_COLLECTIONS( members.begin(), members.end(), expected.begin(), expected.end() );
 }
 
 

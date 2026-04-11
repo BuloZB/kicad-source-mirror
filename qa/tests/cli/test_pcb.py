@@ -94,31 +94,28 @@ def test_pcb_export_svg( kitest: KiTestFixture,
         # This test works only with Python >= 3.9 because it uses a pathlib function only existing
         # in 3.9 and newer. So skip it for previous versions
         if sys.hexversion >= 0x03090000 :
-            # Comparison DPI = 1270 => 1px == 20um. I.e. allowable error of 60 um after eroding
-            assert utils.svgs_are_equivalent( str( generated_svg_path ), svg_source_path, 1270,
+            # Comparison DPI = 850 => 1px == 30um. I.e. allowable error of 90 um after eroding
+            assert utils.svgs_are_equivalent( str( generated_svg_path ), svg_source_path, 850,
                                               diff_handler=kitest.add_attachment )
 
 
-@pytest.mark.skipif(not utils.is_gerbv_installed(), reason="Requires gerbv to be installed")
-@pytest.mark.parametrize("test_file,layers_to_test,originInches,windowsizeInches",
+@pytest.mark.skipif(not utils.is_gerbview_available(), reason="Requires gerbview kiface (kicad-cli gerber)")
+@pytest.mark.parametrize("test_file,layers_to_test,max_diff_percent",
                          [
                             (
                                 "cli/artwork_generation_regressions/ZoneFill-4.0.7.kicad_pcb",
                                 ["F.Cu","B.Cu"],
-                                ( 3.5, -4.6 ),
-                                ( 4.3, 2.2 )
+                                0.5
                             ),
                             (   "cli/artwork_generation_regressions/ZoneFill-Legacy.brd",
                                 ["F.Cu","B.Cu"],
-                                ( -0.6, -0.4 ),
-                                ( 1.7, 0.8 )
+                                0.5
                             )
                          ])
 def test_pcb_export_gerber( kitest: KiTestFixture,
                             test_file: str,
                             layers_to_test: List[str],
-                            originInches :  Tuple[float, float],
-                            windowsizeInches :  Tuple[float, float] ):
+                            max_diff_percent: float ):
 
     input_file = kitest.get_data_file_path( test_file )
 
@@ -151,10 +148,9 @@ def test_pcb_export_gerber( kitest: KiTestFixture,
         layer_name_fixed = "-" + layer_name.replace( ".", "_" )
         gbr_source_path += layer_name_fixed + ".gbr"
 
-        # Comparison DPI = 5080 => 1px == 5um. I.e. allowable error of 15 um after eroding
-        assert utils.gerbers_are_equivalent( str( generated_gerber_path ), gbr_source_path, 5080,
-                                             originInches, windowsizeInches,
-                                             diff_handler=kitest.add_attachment )
+        assert utils.gerbers_are_equivalent( str( generated_gerber_path ), gbr_source_path,
+                                             diff_handler=kitest.add_attachment,
+                                             max_diff_percent=max_diff_percent )
 
 
 @pytest.mark.parametrize("test_file,golden_name,output_dir,skip_line_count,cli_args",

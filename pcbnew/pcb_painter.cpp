@@ -2813,7 +2813,7 @@ void PCB_PAINTER::draw( const FOOTPRINT* aFootprint, int aLayer )
 #endif
     }
 
-    if( aLayer == LAYER_CONFLICTS_SHADOW )
+    if( aLayer == LAYER_CONFLICTS_SHADOW && aFootprint->IsConflicting() )
     {
         const SHAPE_POLY_SET& frontpoly = aFootprint->GetCourtyard( F_CrtYd );
         const SHAPE_POLY_SET& backpoly = aFootprint->GetCourtyard( B_CrtYd );
@@ -2905,13 +2905,17 @@ void PCB_PAINTER::draw( const ZONE* aZone, int aLayer )
 {
     if( aLayer == LAYER_CONFLICTS_SHADOW )
     {
-        COLOR4D color = m_pcbSettings.GetColor( aZone, aLayer );
+        if( aZone->IsConflicting() && aZone->GetIsRuleArea() )
+        {
+            COLOR4D color = m_pcbSettings.GetColor( aZone, aLayer );
 
-        m_gal->SetIsFill( true );
-        m_gal->SetIsStroke( false );
-        m_gal->SetFillColor( color );
+            m_gal->SetIsFill( true );
+            m_gal->SetIsStroke( false );
+            m_gal->SetFillColor( color );
 
-        m_gal->DrawPolygon( aZone->Outline()->Outline( 0 ) );
+            m_gal->DrawPolygon( aZone->Outline()->Outline( 0 ) );
+        }
+
         return;
     }
 

@@ -390,6 +390,14 @@ PCBNEW_JOBS_HANDLER::~PCBNEW_JOBS_HANDLER()
 }
 
 
+void PCBNEW_JOBS_HANDLER::ClearCachedBoard()
+{
+    delete m_cliBoard;
+    m_cliBoard = nullptr;
+    m_toolManager.reset();
+}
+
+
 TOOL_MANAGER* PCBNEW_JOBS_HANDLER::getToolManager( BOARD* aBrd )
 {
     TOOL_MANAGER* toolManager = nullptr;

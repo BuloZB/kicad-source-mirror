@@ -466,9 +466,8 @@ void WX_VIEW_CONTROLS::onWheel( wxMouseEvent& aEvent )
             const int    rotation = aEvent.GetWheelRotation() * ( m_settings.m_scrollReverseZoom ? -1 : 1 );
             const double zoomScale = m_zoomController->GetScaleForRotation( rotation );
 
+            wxLogTrace( traceGalProfile, "Zoom: %.5f",  m_view->GetScale() * zoomScale );
 
-
-            KI_TRACE( traceGalProfile, "Zoom: %.5f\n",  m_view->GetScale() * zoomScale );
             if( IsCursorWarpingEnabled() )
             {
                 CenterOnCursor();

@@ -31,6 +31,7 @@
 #include "spice_settings.h"
 #include "simulator.h"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -182,7 +183,7 @@ public:
 
 protected:
     ///< Reporter object to receive simulation log.
-    SIMULATOR_REPORTER* m_reporter;
+    std::atomic<SIMULATOR_REPORTER*> m_reporter;
 
     ///< We don't own this.  We are just borrowing it from the #SCHEMATIC_SETTINGS.
     std::shared_ptr<SPICE_SETTINGS> m_settings;

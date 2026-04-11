@@ -609,8 +609,7 @@ std::vector<int> ZONE::ViewGetLayers() const
                 layers.push_back( layer + static_cast<int>( LAYER_ZONE_START ) );
             } );
 
-    if( IsConflicting() )
-        layers.push_back( LAYER_CONFLICTS_SHADOW );
+    layers.push_back( LAYER_CONFLICTS_SHADOW );
 
     return layers;
 }

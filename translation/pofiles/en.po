@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: KiCad\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-04-02 14:39+0300\n"
+"POT-Creation-Date: 2026-04-07 19:08+0300\n"
 "PO-Revision-Date: 2018-07-15 17:07+0200\n"
 "Last-Translator: Simon Richter <Simon.Richter@hogyros.de>\n"
 "Language-Team: Simon Richter <Simon.Richter@hogyros.de>\n"
@@ -1187,6 +1187,76 @@ msgstr "No shape in black and white image to convert: no outline created."
 
 msgid "Modification from API"
 msgstr "Modification from API"
+
+#, c-format
+msgid "invalid plugin configuration at '%s': %s"
+msgstr "invalid plugin configuration at '%s': %s"
+
+#, c-format
+msgid "invalid plugin runtime: %s"
+msgstr "invalid plugin runtime: %s"
+
+msgid "could not read plugin configuration file"
+msgstr "could not read plugin configuration file"
+
+#, c-format
+msgid "plugin configuration file error: %s"
+msgstr "plugin configuration file error: %s"
+
+#, c-format
+msgid "missing or invalid required keys: %s"
+msgstr "missing or invalid required keys: %s"
+
+#, c-format
+msgid "identifier '%s' is invalid"
+msgstr "identifier '%s' is invalid"
+
+#, c-format
+msgid "actions section is invalid: %s"
+msgstr "actions section is invalid: %s"
+
+#, c-format
+msgid "Plugin action '%s': %s"
+msgstr "Plugin action '%s': %s"
+
+#, c-format
+msgid "Plugin '%s': %s"
+msgstr "Plugin '%s': %s"
+
+#, c-format
+msgid "exited with code %d"
+msgstr "exited with code %d"
+
+msgid "action is not registered"
+msgstr "action is not registered"
+
+msgid "missing plugin environment"
+msgstr "missing plugin environment"
+
+#, c-format
+msgid "entrypoint '%s' could not be read"
+msgstr "entrypoint '%s' could not be read"
+
+msgid "process could not be created"
+msgstr "process could not be created"
+
+#, c-format
+msgid "entrypoint '%s' is not executable"
+msgstr "entrypoint '%s' is not executable"
+
+msgid "could not launch plugin"
+msgstr "could not launch plugin"
+
+#, c-format
+msgid "error code %d"
+msgstr "error code %d"
+
+#, c-format
+msgid "could not create plugin environment: %s"
+msgstr "could not create plugin environment: %s"
+
+msgid "requirements.txt could not be read"
+msgstr "requirements.txt could not be read"
 
 msgid "Process could not be created"
 msgstr "Process could not be created"
@@ -5048,6 +5118,33 @@ msgstr "Schematic: Export PDF"
 msgid "Schematic PythonBOM export"
 msgstr "Schematic PythonBOM export"
 
+msgid "Gerber Diff"
+msgstr "Gerber Diff"
+
+msgid "Gerber Diff Job Settings"
+msgstr "Gerber Diff Job Settings"
+
+msgid "Gerber: Diff"
+msgstr "Gerber: Diff"
+
+msgid "Gerber Export PNG"
+msgstr "Gerber Export PNG"
+
+msgid "Gerber Export PNG Job Settings"
+msgstr "Gerber Export PNG Job Settings"
+
+msgid "Gerber: Export PNG"
+msgstr "Gerber: Export PNG"
+
+msgid "Gerber Info"
+msgstr "Gerber Info"
+
+msgid "Gerber Info Job Settings"
+msgstr "Gerber Info Job Settings"
+
+msgid "Gerber: Info"
+msgstr "Gerber: Info"
+
 msgid "Perform DRC"
 msgstr "Perform DRC"
 
@@ -7060,15 +7157,21 @@ msgstr "Select a File"
 msgid "Select Path"
 msgstr "Select Path"
 
+msgid "Messages"
+msgstr "Messages"
+
+msgid "Clear"
+msgstr "Clear"
+
 msgid "View load messages"
 msgstr "View load messages"
 
 #, c-format
-msgid "View %zu load message(s)"
-msgstr "View %zu load message(s)"
+msgid "View %zu message(s)"
+msgstr "View %zu message(s)"
 
-msgid "Load Messages"
-msgstr "Load Messages"
+msgid "View messages"
+msgstr "View messages"
 
 msgid "Sort by Best Match"
 msgstr "Sort by Best Match"
@@ -8492,10 +8595,8 @@ msgstr "Exclude with comment..."
 msgid "Change severity to Error for all '%s' violations"
 msgstr "Change severity to Error for all '%s' violations"
 
-msgid ""
-"Violation severities can also be edited in the Schematic Setup... dialog"
-msgstr ""
-"Violation severities can also be edited in the Schematic Setup... dialog"
+msgid "Violation severities can also be edited in Schematic Setup"
+msgstr "Violation severities can also be edited in Schematic Setup"
 
 #, c-format
 msgid "Change severity to Warning for all '%s' violations"
@@ -8511,8 +8612,8 @@ msgstr "Violations will not be checked or reported"
 msgid "Edit pin-to-pin conflict map..."
 msgstr "Edit pin-to-pin conflict map..."
 
-msgid "Open the Schematic Setup... dialog"
-msgstr "Open the Schematic Setup... dialog"
+msgid "Open the Schematic Setup dialog"
+msgstr "Open the Schematic Setup dialog"
 
 msgid "Edit violation severities..."
 msgstr "Edit violation severities..."
@@ -10827,6 +10928,13 @@ msgstr "Enter name for the copied variant:"
 msgid "Copy Design Variant"
 msgstr "Copy Design Variant"
 
+msgid "Cannot edit the default variant description."
+msgstr "Cannot edit the default variant description."
+
+#, c-format
+msgid "Edit Description for '%s'"
+msgstr "Edit Description for '%s'"
+
 msgid "Add a new field"
 msgstr "Add a new field"
 
@@ -12793,11 +12901,6 @@ msgstr "Error loading symbol library '%s'."
 msgid "Non-KiCad Schematic..."
 msgstr "Non-KiCad Schematic..."
 
-msgid ""
-"Replace current schematic sheet with one imported from another application"
-msgstr ""
-"Replace current schematic sheet with one imported from another application"
-
 msgid "Footprint Assignments..."
 msgstr "Footprint Assignments..."
 
@@ -13210,6 +13313,9 @@ msgstr "Bus Entry Type"
 msgid "Resolved Netclass"
 msgstr "Resolved Netclass"
 
+msgid "Wire Style"
+msgstr "Wire Style"
+
 msgid "Connection Name"
 msgstr "Connection Name"
 
@@ -13310,6 +13416,15 @@ msgstr "Regex Search"
 
 msgid "Find in Net Inspector"
 msgstr "Find in Net Inspector"
+
+msgid "No design variants to edit."
+msgstr "No design variants to edit."
+
+msgid "Select variant to edit description:"
+msgstr "Select variant to edit description:"
+
+msgid "Edit Variant Description"
+msgstr "Edit Variant Description"
 
 msgid "Select variant name to remove:"
 msgstr "Select variant name to remove:"
@@ -18008,6 +18123,14 @@ msgstr "Import Graphics..."
 msgid "Import 2D drawing file"
 msgstr "Import 2D drawing file"
 
+msgid "Import Non-KiCad Schematic..."
+msgstr "Import Non-KiCad Schematic..."
+
+msgid ""
+"Replace current schematic sheet with one imported from another application"
+msgstr ""
+"Replace current schematic sheet with one imported from another application"
+
 msgid "Switch to PCB Editor"
 msgstr "Switch to PCB Editor"
 
@@ -18379,6 +18502,12 @@ msgstr "Remove Design Variant..."
 
 msgid "Remove an existing design variant from the schematic."
 msgstr "Remove an existing design variant from the schematic."
+
+msgid "Edit Variant Description..."
+msgstr "Edit Variant Description..."
+
+msgid "Edit the description of an existing design variant."
+msgstr "Edit the description of an existing design variant."
 
 msgid "Align"
 msgstr "Align"
@@ -19647,9 +19776,6 @@ msgstr "<b>unzipped file %s read error</b>"
 msgid "Open Zip File"
 msgstr "Open Zip File"
 
-msgid "Messages"
-msgstr "Messages"
-
 msgid "Attribute"
 msgstr "Attribute"
 
@@ -19671,9 +19797,6 @@ msgstr "Start"
 
 msgid "End"
 msgstr "End"
-
-msgid "Clear"
-msgstr "Clear"
 
 msgid "Polarity"
 msgstr "Polarity"
@@ -20246,6 +20369,81 @@ msgstr "Upgrades the footprint library to the current kicad version format"
 
 msgid "Forces the footprint library to be resaved regardless of versioning"
 msgstr "Forces the footprint library to be resaved regardless of versioning"
+
+msgid ""
+"View and compare existing Gerber/Excellon files. To export Gerbers from a "
+"PCB, use 'pcb export gerber'"
+msgstr ""
+"View and compare existing Gerber/Excellon files. To export Gerbers from a "
+"PCB, use 'pcb export gerber'"
+
+msgid "Convert Gerber/Excellon to other formats"
+msgstr "Convert Gerber/Excellon to other formats"
+
+msgid "Convert a Gerber or Excellon file to PNG image"
+msgstr "Convert a Gerber or Excellon file to PNG image"
+
+msgid "Resolution in DPI (default: 300)"
+msgstr "Resolution in DPI (default: 300)"
+
+msgid "Output width in pixels (overrides DPI)"
+msgstr "Output width in pixels (overrides DPI)"
+
+msgid "Output height in pixels (overrides DPI)"
+msgstr "Output height in pixels (overrides DPI)"
+
+msgid "Use transparent background (default)"
+msgstr "Use transparent background (default)"
+
+msgid "Fail on any parse warnings or errors"
+msgstr "Fail on any parse warnings or errors"
+
+msgid "Compare two Gerber or Excellon files and show differences"
+msgstr "Compare two Gerber or Excellon files and show differences"
+
+msgid "Reference file (first Gerber/Excellon file)"
+msgstr "Reference file (first Gerber/Excellon file)"
+
+msgid "Comparison file (second Gerber/Excellon file)"
+msgstr "Comparison file (second Gerber/Excellon file)"
+
+msgid "Output format: png, text, or json (default: png)"
+msgstr "Output format: png, text, or json (default: png)"
+
+msgid "Resolution in DPI for PNG output (default: 300)"
+msgstr "Resolution in DPI for PNG output (default: 300)"
+
+msgid "Disable anti-aliasing for PNG output"
+msgstr "Disable anti-aliasing for PNG output"
+
+msgid "Use transparent background for PNG output"
+msgstr "Use transparent background for PNG output"
+
+msgid "Only set exit code (0=identical, 1=different), no output"
+msgstr "Only set exit code (0=identical, 1=different), no output"
+
+msgid "Tolerance in nm for floating point comparisons (default: 0)"
+msgstr "Tolerance in nm for floating point comparisons (default: 0)"
+
+#, c-format
+msgid "Invalid output format: %s\n"
+msgstr "Invalid output format: %s\n"
+
+msgid "Display information about a Gerber or Excellon file"
+msgstr "Display information about a Gerber or Excellon file"
+
+msgid "Output format, options: text, json"
+msgstr "Output format, options: text, json"
+
+msgid "Output units, options: mm, inch, mils (default: mm)"
+msgstr "Output units, options: mm, inch, mils (default: mm)"
+
+msgid "Calculate and display copper area"
+msgstr "Calculate and display copper area"
+
+#, c-format
+msgid "Invalid units: %s\n"
+msgstr "Invalid units: %s\n"
 
 msgid "Jobset"
 msgstr "Jobset"
@@ -25895,11 +26093,23 @@ msgstr "horizontal count"
 msgid "vertical count"
 msgstr "vertical count"
 
+#, c-format
+msgid "horizontal delta of zero with %ld objects"
+msgstr "horizontal delta of zero with %ld objects"
+
+#, c-format
+msgid "vertical delta of zero with %ld objects"
+msgstr "vertical delta of zero with %ld objects"
+
 msgid "stagger"
 msgstr "stagger"
 
 msgid "point count"
 msgstr "point count"
+
+#, c-format
+msgid "angular delta of zero with %ld objects"
+msgstr "angular delta of zero with %ld objects"
 
 msgid "Bad parameters"
 msgstr "Bad parameters"
@@ -26359,11 +26569,11 @@ msgstr "Exclude all violations of rule '%s'..."
 msgid "They will be excluded from the %s list"
 msgstr "They will be excluded from the %s list"
 
-msgid "Violation severities can also be edited in the Board Setup... dialog"
-msgstr "Violation severities can also be edited in the Board Setup... dialog"
+msgid "Violation severities can also be edited in Board Setup"
+msgstr "Violation severities can also be edited in Board Setup"
 
-msgid "Open the Board Setup... dialog"
-msgstr "Open the Board Setup... dialog"
+msgid "Open the Board Setup dialog"
+msgstr "Open the Board Setup dialog"
 
 #, c-format
 msgid "Report file '%s' created<br>"
@@ -40851,8 +41061,8 @@ msgstr "Open another board and append its contents to this board"
 msgid "Clear board and get last rescue file automatically saved by PCB editor"
 msgstr "Clear board and get last rescue file automatically saved by PCB editor"
 
-msgid "Non-KiCad Board File..."
-msgstr "Non-KiCad Board File..."
+msgid "Import Non-KiCad Board File..."
+msgstr "Import Non-KiCad Board File…"
 
 msgid "Import board file from other applications"
 msgstr "Import board file from other applications"
@@ -43029,6 +43239,31 @@ msgstr "KiCad Schematic Symbol"
 
 msgid "KiCad Drawing Sheet"
 msgstr "KiCad Drawing Sheet"
+
+#, c-format
+#~ msgid "View %zu load message(s)"
+#~ msgstr "View %zu load message(s)"
+
+#~ msgid "Load Messages"
+#~ msgstr "Load Messages"
+
+#~ msgid ""
+#~ "Violation severities can also be edited in the Schematic Setup... dialog"
+#~ msgstr ""
+#~ "Violation severities can also be edited in the Schematic Setup... dialog"
+
+#~ msgid "Open the Schematic Setup... dialog"
+#~ msgstr "Open the Schematic Setup... dialog"
+
+#~ msgid "Violation severities can also be edited in the Board Setup... dialog"
+#~ msgstr ""
+#~ "Violation severities can also be edited in the Board Setup... dialog"
+
+#~ msgid "Open the Board Setup... dialog"
+#~ msgstr "Open the Board Setup... dialog"
+
+#~ msgid "Non-KiCad Board File..."
+#~ msgstr "Non-KiCad Board File..."
 
 #~ msgid "Start with the built-in KiCad libraries (recommended)"
 #~ msgstr "Start with the built-in KiCad libraries (recommended)"
@@ -96426,9 +96661,6 @@ msgstr "KiCad Drawing Sheet"
 
 #~ msgid "Append another board to currently loaded board"
 #~ msgstr "Append another board to currently loaded board"
-
-#~ msgid "Import Non-KiCad Board File..."
-#~ msgstr "Import Non-KiCad Board File…"
 
 #~ msgid "Revert to Las&t Backup"
 #~ msgstr "Revert to Las&t Backup"

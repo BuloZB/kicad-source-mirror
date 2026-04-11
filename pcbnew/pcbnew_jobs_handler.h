@@ -60,6 +60,12 @@ public:
     int JobUpgrade( JOB* aJob );
     int JobImport( JOB* aJob );
 
+    /**
+     * Clear the cached CLI board so the next job reloads from the current project.
+     * Called when the API server switches documents.
+     */
+    void ClearCachedBoard();
+
 private:
     BOARD* getBoard( const wxString& aPath = wxEmptyString );
     LSEQ convertLayerArg( wxString& aLayerString, BOARD* aBoard ) const;

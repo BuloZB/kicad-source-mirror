@@ -1342,6 +1342,13 @@ void SYMBOL_EDIT_FRAME::SyncLibraries( bool aShowProgress, bool aPreloadCancelle
 
     m_syncLibrariesInProgress = true;
 
+    auto resetGuard = [this]( bool* )
+    {
+        m_syncLibrariesInProgress = false;
+    };
+
+    std::unique_ptr<bool, decltype( resetGuard )> guard( &m_syncLibrariesInProgress, resetGuard );
+
     LIB_ID selected;
 
     if( m_treePane )
@@ -1416,7 +1423,6 @@ void SYMBOL_EDIT_FRAME::SyncLibraries( bool aShowProgress, bool aPreloadCancelle
         }
     }
 
-    m_syncLibrariesInProgress = false;
 }
 
 
