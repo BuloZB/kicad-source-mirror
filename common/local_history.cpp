@@ -32,6 +32,7 @@
 #include <trace_helpers.h>
 #include <wildcards_and_files_ext.h>
 #include <confirm.h>
+#include <progress_reporter.h>
 
 #include <git2.h>
 #include <wx/filename.h>
@@ -1007,7 +1008,90 @@ static bool copyTreeObjects( git_repository* aSrcRepo, git_odb* aSrcOdb, git_odb
     return true;
 }
 
-bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxBytes )
+
+// Compact loose objects into a packfile and remove the originals.
+// Equivalent to git gc
+static bool compactRepository( git_repository* aRepo, PROGRESS_REPORTER* aReporter = nullptr )
+{
+    git_packbuilder* pb = nullptr;
+
+    if( git_packbuilder_new( &pb, aRepo ) != 0 )
+        return false;
+
+    git_revwalk* walk = nullptr;
+
+    if( git_revwalk_new( &walk, aRepo ) != 0 )
+    {
+        git_packbuilder_free( pb );
+        return false;
+    }
+
+    git_revwalk_push_head( walk );
+    git_oid oid;
+
+    while( git_revwalk_next( &oid, walk ) == 0 )
+    {
+        if( git_packbuilder_insert_commit( pb, &oid ) != 0 )
+        {
+            git_revwalk_free( walk );
+            git_packbuilder_free( pb );
+            return false;
+        }
+    }
+
+    git_revwalk_free( walk );
+
+    if( aReporter )
+    {
+        git_packbuilder_set_callbacks(
+                pb,
+                []( int aStage, uint32_t aCurrent, uint32_t aTotal, void* aPayload )
+                {
+                    auto* reporter = static_cast<PROGRESS_REPORTER*>( aPayload );
+
+                    if( aTotal > 0 )
+                        reporter->SetCurrentProgress( (double) aCurrent / aTotal );
+
+                    reporter->KeepRefreshing();
+                    return 0;
+                },
+                aReporter );
+    }
+
+    if( git_packbuilder_write( pb, nullptr, 0, nullptr, nullptr ) != 0 )
+    {
+        git_packbuilder_free( pb );
+        return false;
+    }
+
+    git_packbuilder_free( pb );
+
+    wxString objPath = wxString::FromUTF8( git_repository_path( aRepo ) ) + wxS( "objects" );
+    wxDir    objDir( objPath );
+
+    if( objDir.IsOpened() )
+    {
+        wxArrayString toRemove;
+        wxString      name;
+        bool          cont = objDir.GetFirst( &name, wxEmptyString, wxDIR_DIRS );
+
+        while( cont )
+        {
+            if( name.length() == 2 )
+                toRemove.Add( objPath + wxFileName::GetPathSeparator() + name );
+
+            cont = objDir.GetNext( &name );
+        }
+
+        for( const wxString& dir : toRemove )
+            wxFileName::Rmdir( dir, wxPATH_RMDIR_RECURSIVE );
+    }
+
+    return true;
+}
+
+
+bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxBytes, PROGRESS_REPORTER* aReporter )
 {
     if( aMaxBytes == 0 )
         return false;
@@ -1034,6 +1118,17 @@ bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxB
 
     if( !repo )
         return false;
+
+    if( aReporter )
+        aReporter->Report( _( "Compacting local history..." ) );
+
+    // Pack loose objects first. Can bring size within limit without a full rebuild.
+    compactRepository( repo, aReporter );
+
+    current = dirSizeRecursive( hist );
+
+    if( current <= aMaxBytes )
+        return true; // within limit after compaction
 
     // Collect commits newest-first using revwalk
     git_revwalk* walk = nullptr;
@@ -1126,7 +1221,7 @@ bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxB
     }
 
     if( keep.empty() )
-        keep.push_back( commits.front() ); // ensure at least head
+        keep.push_back( commits.front() );
 
     // Collect tags we want to preserve (Save_*/Last_Save_*). We'll recreate them if their
     // target commit is retained. Also ensure tagged commits are ALWAYS kept.
@@ -1220,8 +1315,18 @@ bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxB
     struct MAP_ENTRY { git_oid orig; git_oid neu; };
     std::vector<MAP_ENTRY> commitMap;
 
-    for( const git_oid& co : keep )
+    if( aReporter )
     {
+        aReporter->AdvancePhase( _( "Trimming local history..." ) );
+        aReporter->SetCurrentProgress( 0 );
+    }
+
+    for( size_t idx = 0; idx < keep.size(); ++idx )
+    {
+        if( aReporter )
+            aReporter->SetCurrentProgress( (double) idx / keep.size() );
+
+        const git_oid& co = keep[idx];
         git_commit* orig = nullptr;
 
         if( git_commit_lookup( &orig, repo, &co ) != 0 )
@@ -1303,6 +1408,11 @@ bool LOCAL_HISTORY::EnforceSizeLimit( const wxString& aProjectPath, size_t aMaxB
             git_object_free( obj );
         }
     }
+
+    if( aReporter )
+        aReporter->AdvancePhase( _( "Compacting trimmed history..." ) );
+
+    compactRepository( newRepo, aReporter );
 
     // Free ODBs and close repos before swapping directories to avoid file locking issues.
     // Note: The lock manager will automatically free the original repo when it goes out of scope,

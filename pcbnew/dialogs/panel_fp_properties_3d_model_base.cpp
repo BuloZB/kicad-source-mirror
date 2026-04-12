@@ -169,7 +169,7 @@ PANEL_FP_PROPERTIES_3D_MODEL_BASE::PANEL_FP_PROPERTIES_3D_MODEL_BASE( wxWindow* 
 	m_extrusionMaterialLabel->Wrap( -1 );
 	fgSizer1->Add( m_extrusionMaterialLabel, 0, wxALL, 5 );
 
-	wxString m_extrusionMaterialChoiceChoices[] = { _("Plastic"), _("Matte"), _("Metal"), _("Copper"), wxEmptyString };
+	wxString m_extrusionMaterialChoiceChoices[] = { _("Plastic"), _("Matte"), _("Metal"), _("Copper") };
 	int m_extrusionMaterialChoiceNChoices = sizeof( m_extrusionMaterialChoiceChoices ) / sizeof( wxString );
 	m_extrusionMaterialChoice = new wxChoice( m_extrusionSizer->GetStaticBox(), wxID_ANY, wxDefaultPosition, wxDefaultSize, m_extrusionMaterialChoiceNChoices, m_extrusionMaterialChoiceChoices, 0 );
 	m_extrusionMaterialChoice->SetSelection( 0 );
