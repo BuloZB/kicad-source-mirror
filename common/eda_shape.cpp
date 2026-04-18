@@ -27,6 +27,7 @@
 
 #include <eda_shape.h>
 
+#include <base_units.h>
 #include <bezier_curves.h>
 #include <convert_basic_shapes_to_polygon.h>
 #include <eda_draw_frame.h>
@@ -212,80 +213,78 @@ EDA_SHAPE& EDA_SHAPE::operator=( const EDA_SHAPE& aOther )
 
 void EDA_SHAPE::Serialize( google::protobuf::Any &aContainer ) const
 {
+    Serialize( aContainer, pcbIUScale );
+}
+
+
+void EDA_SHAPE::Serialize( google::protobuf::Any &aContainer, const EDA_IU_SCALE &aScale ) const
+{
     using namespace kiapi::common;
     types::GraphicShape shape;
 
     types::StrokeAttributes* stroke = shape.mutable_attributes()->mutable_stroke();
     types::GraphicFillAttributes* fill = shape.mutable_attributes()->mutable_fill();
 
-    stroke->mutable_width()->set_value_nm( GetWidth() );
+    PackDistance( *stroke->mutable_width(), GetWidth(), aScale );
+    stroke->set_style( ToProtoEnum<LINE_STYLE, types::StrokeLineStyle>( m_stroke.GetLineStyle() ) );
 
-    switch( GetLineStyle() )
-    {
-    case LINE_STYLE::DEFAULT:    stroke->set_style( types::SLS_DEFAULT );    break;
-    case LINE_STYLE::SOLID:      stroke->set_style( types::SLS_SOLID );      break;
-    case LINE_STYLE::DASH:       stroke->set_style( types::SLS_DASH );       break;
-    case LINE_STYLE::DOT:        stroke->set_style( types::SLS_DOT );        break;
-    case LINE_STYLE::DASHDOT:    stroke->set_style( types::SLS_DASHDOT );    break;
-    case LINE_STYLE::DASHDOTDOT: stroke->set_style( types::SLS_DASHDOTDOT ); break;
-    default: break;
-    }
+    if( m_stroke.GetColor() != COLOR4D::UNSPECIFIED )
+        PackColor( *stroke->mutable_color(), m_stroke.GetColor() );
 
-    switch( GetFillMode() )
-    {
-    case FILL_T::FILLED_SHAPE: fill->set_fill_type( types::GFT_FILLED );   break;
-    default:                   fill->set_fill_type( types::GFT_UNFILLED ); break;
-    }
+    fill->set_fill_type( ToProtoEnum<FILL_T, types::GraphicFillType>( GetFillMode() ) );
+
+    if( m_fillColor != COLOR4D::UNSPECIFIED )
+        PackColor( *fill->mutable_color(), m_fillColor );
 
     switch( GetShape() )
     {
     case SHAPE_T::SEGMENT:
     {
         types::GraphicSegmentAttributes* segment = shape.mutable_segment();
-        PackVector2( *segment->mutable_start(), GetStart() );
-        PackVector2( *segment->mutable_end(), GetEnd() );
+        PackVector2( *segment->mutable_start(), GetStart(), aScale );
+        PackVector2( *segment->mutable_end(), GetEnd(), aScale );
         break;
     }
 
     case SHAPE_T::RECTANGLE:
     {
         types::GraphicRectangleAttributes* rectangle = shape.mutable_rectangle();
-        PackVector2( *rectangle->mutable_top_left(), GetStart() );
-        PackVector2( *rectangle->mutable_bottom_right(), GetEnd() );
-        rectangle->mutable_corner_radius()->set_value_nm( GetCornerRadius() );
+        PackVector2( *rectangle->mutable_top_left(), GetStart(), aScale );
+        PackVector2( *rectangle->mutable_bottom_right(), GetEnd(), aScale );
+        PackDistance( *rectangle->mutable_corner_radius(), GetCornerRadius(), aScale );
         break;
     }
 
     case SHAPE_T::ARC:
     {
         types::GraphicArcAttributes* arc = shape.mutable_arc();
-        PackVector2( *arc->mutable_start(), GetStart() );
-        PackVector2( *arc->mutable_mid(), GetArcMid() );
-        PackVector2( *arc->mutable_end(), GetEnd() );
+        PackVector2( *arc->mutable_start(), GetStart(), aScale );
+        PackVector2( *arc->mutable_mid(), GetArcMid(), aScale );
+        PackVector2( *arc->mutable_end(), GetEnd(), aScale );
         break;
     }
 
     case SHAPE_T::CIRCLE:
     {
         types::GraphicCircleAttributes* circle = shape.mutable_circle();
-        PackVector2( *circle->mutable_center(), GetStart() );
-        PackVector2( *circle->mutable_radius_point(), GetEnd() );
+        PackVector2( *circle->mutable_center(), GetStart(), aScale );
+        PackVector2( *circle->mutable_radius_point(), GetEnd(), aScale );
         break;
     }
 
     case SHAPE_T::POLY:
     {
-        PackPolySet( *shape.mutable_polygon(), GetPolyShape() );
+        PackPolySet( *shape.mutable_polygon(), GetPolyShape(), aScale );
         break;
     }
 
     case SHAPE_T::BEZIER:
     {
         types::GraphicBezierAttributes* bezier = shape.mutable_bezier();
-        PackVector2( *bezier->mutable_start(), GetStart() );
-        PackVector2( *bezier->mutable_control1(), GetBezierC1() );
-        PackVector2( *bezier->mutable_control2(), GetBezierC2() );
-        PackVector2( *bezier->mutable_end(), GetEnd() );
+        PackVector2( *bezier->mutable_start(), GetStart(), aScale );
+        PackVector2( *bezier->mutable_control1(), GetBezierC1(), aScale );
+        PackVector2( *bezier->mutable_control2(), GetBezierC2(), aScale );
+        PackVector2( *bezier->mutable_end(), GetEnd(), aScale );
         break;
     }
 
@@ -300,6 +299,12 @@ void EDA_SHAPE::Serialize( google::protobuf::Any &aContainer ) const
 
 
 bool EDA_SHAPE::Deserialize( const google::protobuf::Any &aContainer )
+{
+    return Deserialize( aContainer, pcbIUScale );
+}
+
+
+bool EDA_SHAPE::Deserialize( const google::protobuf::Any &aContainer, const EDA_IU_SCALE &aScale )
 {
     using namespace kiapi::common;
 
@@ -319,59 +324,63 @@ bool EDA_SHAPE::Deserialize( const google::protobuf::Any &aContainer )
     m_editState = 0;
     m_proxyItem = false;
     m_endsSwapped = false;
+    m_fillColor = COLOR4D::UNSPECIFIED;
 
-    SetFilled( shape.attributes().fill().fill_type() == types::GFT_FILLED );
-    SetWidth( shape.attributes().stroke().width().value_nm() );
+    if( shape.attributes().stroke().has_color() )
+        m_stroke.SetColor( UnpackColor( shape.attributes().stroke().color() ) );
+    else
+        m_stroke.SetColor( COLOR4D::UNSPECIFIED );
 
-    switch( shape.attributes().stroke().style() )
+    if( shape.attributes().fill().has_color() )
+        SetFillColor( UnpackColor( shape.attributes().fill().color() ) );
+
+    if( shape.attributes().has_stroke() )
     {
-    case types::SLS_DEFAULT:    SetLineStyle( LINE_STYLE::DEFAULT );    break;
-    case types::SLS_SOLID:      SetLineStyle( LINE_STYLE::SOLID );      break;
-    case types::SLS_DASH:       SetLineStyle( LINE_STYLE::DASH );       break;
-    case types::SLS_DOT:        SetLineStyle( LINE_STYLE::DOT );        break;
-    case types::SLS_DASHDOT:    SetLineStyle( LINE_STYLE::DASHDOT );    break;
-    case types::SLS_DASHDOTDOT: SetLineStyle( LINE_STYLE::DASHDOTDOT ); break;
-    default: break;
+        SetWidth( UnpackDistance( shape.attributes().stroke().width(), aScale ) );
+        SetLineStyle( FromProtoEnum<LINE_STYLE, types::StrokeLineStyle>( shape.attributes().stroke().style() ) );
     }
+
+    if( shape.attributes().has_fill() )
+        SetFillMode( FromProtoEnum<FILL_T, types::GraphicFillType>( shape.attributes().fill().fill_type() ) );
 
     if( shape.has_segment() )
     {
         SetShape( SHAPE_T::SEGMENT );
-        SetStart( UnpackVector2( shape.segment().start() ) );
-        SetEnd( UnpackVector2( shape.segment().end() ) );
+        SetStart( UnpackVector2( shape.segment().start(), aScale ) );
+        SetEnd( UnpackVector2( shape.segment().end(), aScale ) );
     }
     else if( shape.has_rectangle() )
     {
         SetShape( SHAPE_T::RECTANGLE );
-        SetStart( UnpackVector2( shape.rectangle().top_left() ) );
-        SetEnd( UnpackVector2( shape.rectangle().bottom_right() ) );
-        SetCornerRadius( shape.rectangle().corner_radius().value_nm() );
+        SetStart( UnpackVector2( shape.rectangle().top_left(), aScale ) );
+        SetEnd( UnpackVector2( shape.rectangle().bottom_right(), aScale ) );
+        SetCornerRadius( UnpackDistance( shape.rectangle().corner_radius(), aScale ) );
     }
     else if( shape.has_arc() )
     {
         SetShape( SHAPE_T::ARC );
-        SetArcGeometry( UnpackVector2( shape.arc().start() ),
-                        UnpackVector2( shape.arc().mid() ),
-                        UnpackVector2( shape.arc().end() ) );
+        SetArcGeometry( UnpackVector2( shape.arc().start(), aScale ),
+                        UnpackVector2( shape.arc().mid(), aScale ),
+                        UnpackVector2( shape.arc().end(), aScale ) );
     }
     else if( shape.has_circle() )
     {
         SetShape( SHAPE_T::CIRCLE );
-        SetStart( UnpackVector2( shape.circle().center() ) );
-        SetEnd( UnpackVector2( shape.circle().radius_point() ) );
+        SetStart( UnpackVector2( shape.circle().center(), aScale ) );
+        SetEnd( UnpackVector2( shape.circle().radius_point(), aScale ) );
     }
     else if( shape.has_polygon() )
     {
         SetShape( SHAPE_T::POLY );
-        SetPolyShape( UnpackPolySet( shape.polygon() ) );
+        SetPolyShape( UnpackPolySet( shape.polygon(), aScale ) );
     }
     else if( shape.has_bezier() )
     {
         SetShape( SHAPE_T::BEZIER );
-        SetStart( UnpackVector2( shape.bezier().start() ) );
-        SetBezierC1( UnpackVector2( shape.bezier().control1() ) );
-        SetBezierC2( UnpackVector2( shape.bezier().control2() ) );
-        SetEnd( UnpackVector2( shape.bezier().end() ) );
+        SetStart( UnpackVector2( shape.bezier().start(), aScale ) );
+        SetBezierC1( UnpackVector2( shape.bezier().control1(), aScale ) );
+        SetBezierC2( UnpackVector2( shape.bezier().control2(), aScale ) );
+        SetEnd( UnpackVector2( shape.bezier().end(), aScale ) );
         RebuildBezierToSegmentsPointsList( getMaxError() );
     }
 
@@ -722,6 +731,8 @@ void EDA_SHAPE::UpdateHatching() const
         UNIMPLEMENTED_FOR( SHAPE_T_asString() );
         return;
     }
+
+    shapeBuffer.ClearArcs();
 
     // Clear cached hatching only after all validation passes.
     // This prevents flickering when early returns would otherwise leave empty hatching.
@@ -2701,28 +2712,63 @@ bool EDA_SHAPE::operator==( const EDA_SHAPE& aOther ) const
     if( m_fillColor != aOther.m_fillColor )
         return false;
 
-    if( m_start != aOther.m_start )
-        return false;
-
-    if( m_end != aOther.m_end )
-        return false;
-
-    if( m_arcCenter != aOther.m_arcCenter )
-        return false;
-
-    if( m_bezierC1 != aOther.m_bezierC1 )
-        return false;
-
-    if( m_bezierC2 != aOther.m_bezierC2 )
-        return false;
-
-    if( m_bezierPoints != aOther.m_bezierPoints )
-        return false;
-
-    for( int ii = 0; ii < GetPolyShape().TotalVertices(); ++ii )
+    switch( GetShape() )
     {
-        if( GetPolyShape().CVertex( ii ) != aOther.GetPolyShape().CVertex( ii ) )
+    case SHAPE_T::SEGMENT:
+    case SHAPE_T::RECTANGLE:
+    case SHAPE_T::CIRCLE:
+        if( m_start != aOther.m_start )
             return false;
+
+        if( m_end != aOther.m_end )
+            return false;
+
+        break;
+
+    case SHAPE_T::ARC:
+        if( m_start != aOther.m_start )
+            return false;
+
+        if( m_end != aOther.m_end )
+            return false;
+
+        if( m_arcCenter != aOther.m_arcCenter )
+            return false;
+
+        break;
+
+    case SHAPE_T::POLY:
+        if( GetPolyShape().TotalVertices() != aOther.GetPolyShape().TotalVertices() )
+            return false;
+
+        for( int ii = 0; ii < GetPolyShape().TotalVertices(); ++ii )
+        {
+            if( GetPolyShape().CVertex( ii ) != aOther.GetPolyShape().CVertex( ii ) )
+                return false;
+        }
+
+        break;
+
+    case SHAPE_T::BEZIER:
+        if( m_start != aOther.m_start )
+            return false;
+
+        if( m_end != aOther.m_end )
+            return false;
+
+        if( m_bezierC1 != aOther.m_bezierC1 )
+            return false;
+
+        if( m_bezierC2 != aOther.m_bezierC2 )
+            return false;
+
+        if( m_bezierPoints != aOther.m_bezierPoints )
+            return false;
+
+        break;
+
+    default:
+        return false;
     }
 
     return true;

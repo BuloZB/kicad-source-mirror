@@ -181,6 +181,7 @@ PANEL_FP_PROPERTIES_3D_MODEL::~PANEL_FP_PROPERTIES_3D_MODEL()
     m_extrusionColorSwatch->Unbind( COLOR_SWATCH_CHANGED, &PANEL_FP_PROPERTIES_3D_MODEL::onExtrusionColorChanged,
                                     this );
     m_extrusionMaterialChoice->Unbind( wxEVT_CHOICE, &PANEL_FP_PROPERTIES_3D_MODEL::onExtrusionMaterialChanged, this );
+    m_showExtrusionCheckbox->Unbind( wxEVT_CHECKBOX, &PANEL_FP_PROPERTIES_3D_MODEL::onExtrusionControlChanged, this );
 
     // free the memory used by all models, otherwise models which were
     // browsed but not used would consume memory
@@ -208,8 +209,8 @@ bool PANEL_FP_PROPERTIES_3D_MODEL::TransferDataToWindow()
 
     m_extrusionLayerChoice->Clear();
     m_extrusionLayerChoice->Append( _( "Auto" ) );
-    m_extrusionLayerChoice->Append( _( "CrtYd" ) );
-    m_extrusionLayerChoice->Append( _( "Fab" ) );
+    m_extrusionLayerChoice->Append( _( "Courtyard layer" ) );
+    m_extrusionLayerChoice->Append( _( "Fabrication layer" ) );
 
     PCB_LAYER_ID layer = body ? body->m_layer : UNDEFINED_LAYER;
     int          selection = 0; // Auto

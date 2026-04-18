@@ -1791,6 +1791,208 @@ BOOST_FIXTURE_TEST_CASE( OffCenterTeardropSymmetry, ZONE_FILL_TEST_FIXTURE )
 
 
 /**
+ * Teardrop on an elongated rectangular pad should not extend outside the pad boundary.
+ *
+ * The test board has a 3.5mm x 0.3mm rectangular SMD pad (rotated 270 degrees in board
+ * coordinates) with a 0.1mm track entering diagonally near the narrow end. Before the fix,
+ * the teardrop's back point (pointD) was projected along the track axis past the pad center,
+ * overshooting the narrow pad boundary by over 0.6mm.
+ */
+BOOST_FIXTURE_TEST_CASE( ElongatedPadTeardropContainment, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "teardrop_elongated_pad", m_board );
+
+    TOOL_MANAGER toolMgr;
+    toolMgr.SetEnvironment( m_board.get(), nullptr, nullptr, nullptr, nullptr );
+
+    KI_TEST::DUMMY_TOOL* dummyTool = new KI_TEST::DUMMY_TOOL();
+    toolMgr.RegisterTool( dummyTool );
+
+    BOARD_COMMIT commit( dummyTool );
+    TEARDROP_MANAGER teardropMgr( m_board.get(), &toolMgr );
+    teardropMgr.UpdateTeardrops( commit, nullptr, nullptr, true );
+
+    if( !commit.Empty() )
+        commit.Push( _( "Add teardrops" ), SKIP_UNDO | SKIP_SET_DIRTY );
+
+    // Find the pad to build an expanded outline for containment checking.
+    // The pad is at board position (136.45, 100.819) with size (3.5, 0.3) rotated 270 deg,
+    // giving board extents X: [136.3, 136.6], Y: [99.069, 102.569].
+    PAD* testPad = nullptr;
+
+    for( FOOTPRINT* fp : m_board->Footprints() )
+    {
+        for( PAD* pad : fp->Pads() )
+        {
+            if( pad->GetNumber() == "7" )
+            {
+                testPad = pad;
+                break;
+            }
+        }
+    }
+
+    BOOST_REQUIRE_MESSAGE( testPad != nullptr, "Could not find pad 7 in test board" );
+
+    // Build the pad outline polygon with a small tolerance for the track half-width
+    int tolerance = std::max( m_board->GetDesignSettings().m_MaxError,
+                              pcbIUScale.mmToIU( 0.001 ) );
+    SHAPE_POLY_SET padPoly;
+    testPad->TransformShapeToPolygon( padPoly, B_Cu, tolerance,
+                                      m_board->GetDesignSettings().m_MaxError, ERROR_OUTSIDE );
+
+    int teardropCount = 0;
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        if( !zone->IsTeardropArea() )
+            continue;
+
+        const SHAPE_POLY_SET* outline = zone->Outline();
+
+        BOOST_REQUIRE_MESSAGE( outline && outline->OutlineCount() > 0,
+                               "Teardrop zone has no outline" );
+
+        teardropCount++;
+
+        const SHAPE_LINE_CHAIN& chain = outline->Outline( 0 );
+
+        // Check each vertex of the teardrop. Vertices on the pad side (closer to pad center
+        // than to the track anchor) must be inside the expanded pad outline.
+        VECTOR2I padCenter = testPad->GetPosition();
+
+        // The track anchor region is near (136.45, 99.16) in mm, i.e., outside the pad.
+        // We only check vertices that are closer to the pad center than to the track anchor.
+        VECTOR2I trackAnchor( pcbIUScale.mmToIU( 136.45 ), pcbIUScale.mmToIU( 99.16 ) );
+
+        for( int i = 0; i < chain.PointCount(); i++ )
+        {
+            VECTOR2I pt = chain.CPoint( i );
+            double distToPad = ( VECTOR2D( pt ) - VECTOR2D( padCenter ) ).EuclideanNorm();
+            double distToTrack = ( VECTOR2D( pt ) - VECTOR2D( trackAnchor ) ).EuclideanNorm();
+
+            // Only check vertices on the pad side of the teardrop
+            if( distToPad < distToTrack )
+            {
+                BOOST_CHECK_MESSAGE(
+                        padPoly.Contains( pt ),
+                        wxString::Format( "Teardrop vertex (%d, %d) is outside the pad "
+                                          "outline with %d nm tolerance",
+                                          pt.x, pt.y, tolerance ) );
+            }
+        }
+    }
+
+    BOOST_CHECK_MESSAGE( teardropCount > 0,
+                         "Expected at least one teardrop zone for elongated pad" );
+}
+
+
+/**
+ * Teardrop spanning two track segments at an angle should not produce self-intersecting
+ * edges. When a teardrop extends from a via along a short horizontal segment then onto
+ * an angled segment, the polygon must follow the track bend with proper junction
+ * transition points rather than cutting diagonally across the bend.
+ *
+ * Tests both curved and straight edge modes since they use different polygon assembly paths.
+ */
+BOOST_FIXTURE_TEST_CASE( TwoSegmentAngledTeardropNoSelfIntersection, ZONE_FILL_TEST_FIXTURE )
+{
+    auto runVariant = [&]( bool aCurvedEdges )
+    {
+        KI_TEST::LoadBoard( m_settingsManager, "two_segment_teardrop", m_board );
+
+        for( PCB_TRACK* track : m_board->Tracks() )
+        {
+            if( track->Type() == PCB_VIA_T )
+            {
+                static_cast<PCB_VIA*>( track )->SetTeardropCurved( aCurvedEdges );
+                break;
+            }
+        }
+
+        TOOL_MANAGER toolMgr;
+        toolMgr.SetEnvironment( m_board.get(), nullptr, nullptr, nullptr, nullptr );
+
+        KI_TEST::DUMMY_TOOL* dummyTool = new KI_TEST::DUMMY_TOOL();
+        toolMgr.RegisterTool( dummyTool );
+
+        BOARD_COMMIT commit( dummyTool );
+        TEARDROP_MANAGER teardropMgr( m_board.get(), &toolMgr );
+        teardropMgr.UpdateTeardrops( commit, nullptr, nullptr, true );
+
+        if( !commit.Empty() )
+            commit.Push( _( "Add teardrops" ), SKIP_UNDO | SKIP_SET_DIRTY );
+
+        int  teardropCount = 0;
+        bool foundSelfIntersection = false;
+
+        for( ZONE* zone : m_board->Zones() )
+        {
+            if( !zone->IsTeardropArea() )
+                continue;
+
+            teardropCount++;
+
+            const SHAPE_POLY_SET* outline = zone->Outline();
+
+            if( !outline || outline->OutlineCount() == 0 )
+                continue;
+
+            const SHAPE_LINE_CHAIN& chain = outline->Outline( 0 );
+            int n = chain.PointCount();
+
+            for( int i = 0; i < n && !foundSelfIntersection; i++ )
+            {
+                SEG segA( chain.CPoint( i ), chain.CPoint( ( i + 1 ) % n ) );
+
+                for( int j = i + 2; j < n; j++ )
+                {
+                    if( i == 0 && j == n - 1 )
+                        continue;
+
+                    SEG segB( chain.CPoint( j ), chain.CPoint( ( j + 1 ) % n ) );
+                    OPT_VECTOR2I hit = segA.Intersect( segB );
+
+                    if( hit.has_value() )
+                    {
+                        BOOST_TEST_MESSAGE( wxString::Format(
+                                "Self-intersection at (%d, %d) between edges %d and %d "
+                                "(curved=%s)",
+                                hit->x, hit->y, i, j,
+                                aCurvedEdges ? "yes" : "no" ) );
+
+                        for( int k = 0; k < n; k++ )
+                        {
+                            BOOST_TEST_MESSAGE( wxString::Format(
+                                    "  pt[%d] = (%d, %d)", k,
+                                    chain.CPoint( k ).x, chain.CPoint( k ).y ) );
+                        }
+
+                        foundSelfIntersection = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        BOOST_CHECK_MESSAGE( teardropCount > 0,
+                             wxString::Format( "Expected at least one teardrop zone "
+                                               "(curved=%s)",
+                                               aCurvedEdges ? "yes" : "no" ) );
+
+        BOOST_CHECK_MESSAGE( !foundSelfIntersection,
+                             wxString::Format( "Teardrop polygon has self-intersecting "
+                                               "edges (curved=%s)",
+                                               aCurvedEdges ? "yes" : "no" ) );
+    };
+
+    runVariant( true );
+    runVariant( false );
+}
+
+
+/**
  * Test for issue 23515: Zone fills have random pieces missing near keepout boundaries.
  *
  * The test board is a reporter-provided v9 board file with stored zone fill from the v9

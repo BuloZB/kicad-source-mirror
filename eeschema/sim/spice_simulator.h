@@ -81,10 +81,16 @@ public:
     ///< Return X axis name for a given simulation type
     virtual wxString GetXAxis( SIM_TYPE aType ) const = 0;
 
-    ///< Set a #SIMULATOR_REPORTER object to receive the simulation log.
+    /**
+     * Set a #SIMULATOR_REPORTER object to receive the simulation log.
+     *
+     * The reporter is accessed from ngspice background threads via atomic snapshot.
+     * Callers must ensure the reporter outlives any running simulation, or call
+     * SetReporter(nullptr) and stop the simulation before destroying the reporter.
+     */
     virtual void SetReporter( SIMULATOR_REPORTER* aReporter )
     {
-        m_reporter = aReporter;
+        m_reporter.store( aReporter, std::memory_order_release );
     }
 
     /**
@@ -182,7 +188,7 @@ public:
     static wxString TypeToName( SIM_TYPE aType, bool aShortName );
 
 protected:
-    ///< Reporter object to receive simulation log.
+    ///< Reporter object to receive simulation log (not owned, accessed from BG threads).
     std::atomic<SIMULATOR_REPORTER*> m_reporter;
 
     ///< We don't own this.  We are just borrowing it from the #SCHEMATIC_SETTINGS.

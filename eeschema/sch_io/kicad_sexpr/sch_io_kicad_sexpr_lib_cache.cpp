@@ -272,6 +272,21 @@ void SCH_IO_KICAD_SEXPR_LIB_CACHE::Save( const std::optional<bool>& aOpt )
                 THROW_IO_ERROR( wxString::Format( _( "Cannot create symbol library path '%s'." ), fn.GetPath() ) );
         }
 
+        // Detect renamed symbols whose old source file entries are now orphaned.
+        // Schedule the old files for deletion so they don't linger on disk.
+        for( auto it = m_symbolSourceFiles.begin(); it != m_symbolSourceFiles.end(); )
+        {
+            if( m_symbols.find( it->first ) == m_symbols.end() )
+            {
+                m_pendingFileDeletes.insert( it->second );
+                it = m_symbolSourceFiles.erase( it );
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
         // Group symbols by their source file to preserve multi-symbol files
         std::map<wxString, std::vector<LIB_SYMBOL*>> symbolsByFile;
 

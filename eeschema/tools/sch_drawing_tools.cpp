@@ -163,7 +163,7 @@ int SCH_DRAWING_TOOLS::PlaceSymbol( const TOOL_EVENT& aEvent )
 
     // Get a list of all references in the schematic to avoid duplicates wherever they're placed
     SCH_REFERENCE_LIST existingRefs;
-    hierarchy.GetSymbols( existingRefs );
+    hierarchy.GetSymbols( existingRefs, SYMBOL_FILTER_ALL );
     existingRefs.SortByReferenceOnly();
 
     if( aEvent.IsAction( &SCH_ACTIONS::placeSymbol ) )
@@ -213,7 +213,7 @@ int SCH_DRAWING_TOOLS::PlaceSymbol( const TOOL_EVENT& aEvent )
                 symbol = nullptr;
 
                 existingRefs.Clear();
-                hierarchy.GetSymbols( existingRefs );
+                hierarchy.GetSymbols( existingRefs, SYMBOL_FILTER_ALL );
                 existingRefs.SortByReferenceOnly();
             };
 
@@ -400,7 +400,14 @@ int SCH_DRAWING_TOOLS::PlaceSymbol( const TOOL_EVENT& aEvent )
 
                 EESCHEMA_SETTINGS*    cfg = m_frame->eeconfig();
 
-                if( !libSymbol->IsLocalPower() && cfg->m_Drawing.new_power_symbols == POWER_SYMBOLS::LOCAL )
+                // Only convert between power symbol types. Regular (non-power) symbols must
+                // never be promoted to power symbols just because the default is set to
+                // Global or Local. The preference's Default option means "follow the symbol
+                // definition" and any conversion only applies to symbols that are already
+                // power symbols.
+                if( libSymbol->IsPower()
+                    && !libSymbol->IsLocalPower()
+                    && cfg->m_Drawing.new_power_symbols == POWER_SYMBOLS::LOCAL )
                 {
                     libSymbol->SetLocalPower();
                     wxString keywords = libSymbol->GetKeyWords();
@@ -420,7 +427,8 @@ int SCH_DRAWING_TOOLS::PlaceSymbol( const TOOL_EVENT& aEvent )
                         libSymbol->SetDescription( desc );
                     }
                 }
-                else if( !libSymbol->IsGlobalPower()
+                else if( libSymbol->IsPower()
+                         && !libSymbol->IsGlobalPower()
                          && cfg->m_Drawing.new_power_symbols == POWER_SYMBOLS::GLOBAL )
                 {
                     // We do not currently have local power symbols in the KiCad library, so
@@ -874,7 +882,7 @@ int SCH_DRAWING_TOOLS::ImportSheet( const TOOL_EVENT& aEvent )
                 for( EDA_ITEM* item : newItems )
                     static_cast<SCH_ITEM*>( item )->Move( delta );
 
-                if( !keepAnnotations )
+                if( !keepAnnotations || placingDesignBlock )
                 {
                     if( autoAnnotate )
                     {
@@ -885,7 +893,23 @@ int SCH_DRAWING_TOOLS::ImportSheet( const TOOL_EVENT& aEvent )
                                                   true /* recursive */,
                                                   schSettings.m_AnnotateStartNum,
                                                   true /* aResetAnnotation */,
-                                                  false, false, reporter );
+                                                  false, false, reporter, SYMBOL_FILTER_NON_POWER );
+                    }
+
+                    if( placingDesignBlock )
+                    {
+                        NULL_REPORTER reporter;
+
+                        if( placeAsGroup )
+                            selectionTool->AddItemToSel( group );
+                        else
+                            selectionTool->AddItemsToSel( &newItems, true );
+
+                        m_frame->AnnotateSymbols( &commit, ANNOTATE_SELECTION,
+                                                  (ANNOTATE_ORDER_T) schSettings.m_AnnotateSortOrder,
+                                                  (ANNOTATE_ALGO_T) schSettings.m_AnnotateMethod, true /* recursive */,
+                                                  schSettings.m_AnnotateStartNum, true /* aResetAnnotation */, false,
+                                                  false, reporter, SYMBOL_FILTER_POWER );
                     }
 
                     // Annotation will clear selection, so we need to restore it
@@ -3429,27 +3453,41 @@ int SCH_DRAWING_TOOLS::DrawSheet( const TOOL_EVENT& aEvent )
                 // The cached hierarchy was built before this sheet was added.
                 m_frame->Schematic().RefreshHierarchy();
 
-                // This convoluted logic means we always annotate unless we are drawing a copy/design block
-                // and the user has explicitly requested we keep the annotations via checkbox
+                bool annotateNonPowerSymbols = cfg->m_AnnotatePanel.automatic
+                                               && !( ( isDrawSheetCopy || isDrawSheetFromDesignBlock )
+                                                     && cfg->m_DesignBlockChooserPanel.keep_annotations );
+                bool annotatePowerSymbols = isDrawSheetFromDesignBlock;
 
-                if( cfg->m_AnnotatePanel.automatic
-                    && !( ( isDrawSheetCopy || isDrawSheetFromDesignBlock )
-                          && cfg->m_DesignBlockChooserPanel.keep_annotations ) )
+                if( annotateNonPowerSymbols || annotatePowerSymbols )
                 {
                     // Annotation will remove this from selection, but we add it back later
                     m_selectionTool->AddItemToSel( sheet );
 
                     NULL_REPORTER reporter;
-                    m_frame->AnnotateSymbols( &c,
-                                              ANNOTATE_SELECTION,
-                                              (ANNOTATE_ORDER_T) schSettings.m_AnnotateSortOrder,
-                                              (ANNOTATE_ALGO_T) schSettings.m_AnnotateMethod,
-                                              true,   /* recursive */
-                                              schSettings.m_AnnotateStartNum,
-                                              true,   /* reset */
-                                              false,  /* regroup */
-                                              false,  /* repair */
-                                              reporter );
+
+                    if( annotateNonPowerSymbols )
+                    {
+                        m_frame->AnnotateSymbols( &c, ANNOTATE_SELECTION,
+                                                  (ANNOTATE_ORDER_T) schSettings.m_AnnotateSortOrder,
+                                                  (ANNOTATE_ALGO_T) schSettings.m_AnnotateMethod, true, /* recursive */
+                                                  schSettings.m_AnnotateStartNum, true,                 /* reset */
+                                                  false,                                                /* regroup */
+                                                  false,                                                /* repair */
+                                                  reporter, SYMBOL_FILTER_NON_POWER );
+                    }
+
+                    if( annotatePowerSymbols )
+                    {
+                        m_selectionTool->AddItemToSel( sheet );
+
+                        m_frame->AnnotateSymbols( &c, ANNOTATE_SELECTION,
+                                                  (ANNOTATE_ORDER_T) schSettings.m_AnnotateSortOrder,
+                                                  (ANNOTATE_ALGO_T) schSettings.m_AnnotateMethod, true, /* recursive */
+                                                  schSettings.m_AnnotateStartNum, true,                 /* reset */
+                                                  false,                                                /* regroup */
+                                                  false,                                                /* repair */
+                                                  reporter, SYMBOL_FILTER_POWER );
+                    }
                 }
 
                 if( isDrawSheetFromDesignBlock && cfg->m_DesignBlockChooserPanel.place_as_group )

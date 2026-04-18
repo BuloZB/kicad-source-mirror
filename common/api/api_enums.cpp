@@ -26,6 +26,7 @@
 #include <api/schematic/schematic_types.pb.h>
 
 #include <core/typeinfo.h>
+#include <eda_shape.h>
 #include <font/text_attributes.h>
 #include <jobs/job_export_sch_netlist.h>
 #include <jobs/job_export_sch_plot.h>
@@ -380,32 +381,6 @@ board::types::BoardLayer ToProtoEnum( PCB_LAYER_ID aValue )
 
 
 template<>
-SCH_LAYER_ID FromProtoEnum( schematic::types::SchematicLayer aValue )
-{
-    switch( aValue )
-    {
-
-    default:
-        wxCHECK_MSG( false, SCH_LAYER_ID_START,
-                     "Unhandled case in FromProtoEnum<schematic::types::SchematicLayer>" );
-    }
-}
-
-
-template<>
-schematic::types::SchematicLayer ToProtoEnum( SCH_LAYER_ID aValue )
-{
-    switch( aValue )
-    {
-
-    default:
-        wxCHECK_MSG( false, schematic::types::SchematicLayer::SL_UNKNOWN,
-                     "Unhandled case in ToProtoEnum<SCH_LAYER_ID>");
-    }
-}
-
-
-template<>
 JOB_PAGE_SIZE FromProtoEnum( schematic::jobs::SchematicJobPageSize aValue )
 {
     switch( aValue )
@@ -566,13 +541,14 @@ LINE_STYLE FromProtoEnum( types::StrokeLineStyle aValue )
 {
     switch( aValue )
     {
+    case types::StrokeLineStyle::SLS_UNKNOWN:
     case types::StrokeLineStyle::SLS_DEFAULT:    return LINE_STYLE::DEFAULT;
     case types::StrokeLineStyle::SLS_SOLID:      return LINE_STYLE::SOLID;
     case types::StrokeLineStyle::SLS_DASH:       return LINE_STYLE::DASH;
     case types::StrokeLineStyle::SLS_DOT:        return LINE_STYLE::DOT;
     case types::StrokeLineStyle::SLS_DASHDOT:    return LINE_STYLE::DASHDOT;
     case types::StrokeLineStyle::SLS_DASHDOTDOT: return LINE_STYLE::DASHDOTDOT;
-    case types::StrokeLineStyle::SLS_UNKNOWN:
+
     default:
         wxCHECK_MSG( false, LINE_STYLE::DEFAULT,
                      "Unhandled case in FromProtoEnum<types::StrokeLineStyle>" );
@@ -594,6 +570,45 @@ types::StrokeLineStyle ToProtoEnum( LINE_STYLE aValue )
     default:
         wxCHECK_MSG( false, types::StrokeLineStyle::SLS_UNKNOWN,
                      "Unhandled case in ToProtoEnum<LINE_STYLE>");
+    }
+}
+
+
+template<>
+FILL_T FromProtoEnum( types::GraphicFillType aValue )
+{
+    switch( aValue )
+    {
+    case types::GraphicFillType::GFT_UNFILLED:                          return FILL_T::NO_FILL;
+    case types::GraphicFillType::GFT_FILLED:                            return FILL_T::FILLED_SHAPE;
+    case types::GraphicFillType::GFT_FILLED_WITH_COLOR:                 return FILL_T::FILLED_WITH_COLOR;
+    case types::GraphicFillType::GFT_FILLED_WITH_BACKGROUND_BODY_COLOR: return FILL_T::FILLED_WITH_BG_BODYCOLOR;
+    case types::GraphicFillType::GFT_HATCH:                             return FILL_T::HATCH;
+    case types::GraphicFillType::GFT_REVERSE_HATCH:                     return FILL_T::REVERSE_HATCH;
+    case types::GraphicFillType::GFT_CROSS_HATCH:                       return FILL_T::CROSS_HATCH;
+    case types::GraphicFillType::GFT_UNKNOWN:
+    default:
+        wxCHECK_MSG( false, FILL_T::NO_FILL,
+                     "Unhandled case in FromProtoEnum<types::GraphicFillType>" );
+    }
+}
+
+
+template<>
+types::GraphicFillType ToProtoEnum( FILL_T aValue )
+{
+    switch( aValue )
+    {
+    case FILL_T::NO_FILL:                   return types::GraphicFillType::GFT_UNFILLED;
+    case FILL_T::FILLED_SHAPE:              return types::GraphicFillType::GFT_FILLED;
+    case FILL_T::FILLED_WITH_COLOR:         return types::GraphicFillType::GFT_FILLED_WITH_COLOR;
+    case FILL_T::FILLED_WITH_BG_BODYCOLOR:  return types::GraphicFillType::GFT_FILLED_WITH_BACKGROUND_BODY_COLOR;
+    case FILL_T::HATCH:                     return types::GraphicFillType::GFT_HATCH;
+    case FILL_T::REVERSE_HATCH:             return types::GraphicFillType::GFT_REVERSE_HATCH;
+    case FILL_T::CROSS_HATCH:               return types::GraphicFillType::GFT_CROSS_HATCH;
+    default:
+        wxCHECK_MSG( false, types::GraphicFillType::GFT_UNKNOWN,
+                     "Unhandled case in ToProtoEnum<FILL_T>" );
     }
 }
 

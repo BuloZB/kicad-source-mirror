@@ -41,6 +41,8 @@
 #include <drc/drc_test_provider.h>
 #include <drc/drc_item.h>
 #include <drc/drc_cache_generator.h>
+#include <board.h>
+#include <pcb_marker.h>
 #include <footprint.h>
 #include <pad.h>
 #include <pcb_track.h>
@@ -535,9 +537,9 @@ void DRC_ENGINE::loadImplicitRules()
                     diffPairClearanceRule->m_Name = wxString::Format( _( "tuning profile '%s'" ), aProfileName );
                     diffPairClearanceRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::TUNING_PROFILE );
 
-                    expr = wxString::Format( wxT( "A.hasExactNetclass('%s') && A.Layer == '%s' && A.inDiffPair('*')" ),
-                                             aNetclass->GetName(),
-                                             LSET::Name( aLayerEntry.GetSignalLayer() ) );
+                    expr = wxString::Format(
+                            wxT( "A.hasExactNetclass('%s') && A.Layer == '%s' && AB.isCoupledDiffPair()" ),
+                            aNetclass->GetName(), LSET::Name( aLayerEntry.GetSignalLayer() ) );
                     diffPairClearanceRule->m_Condition = new DRC_RULE_CONDITION( expr );
 
                     DRC_CONSTRAINT min_clearanceConstraint( CLEARANCE_CONSTRAINT );
@@ -790,6 +792,17 @@ void DRC_ENGINE::InitEngine( const std::shared_ptr<DRC_RULE>& rule )
         provider->SetDRCEngine( this );
     }
 
+    // Existing markers may hold raw pointers to DRC_RULEs we're about to destroy.
+    // Null them out so GetSeverity() falls back to the board design settings.
+    if( m_board )
+    {
+        for( PCB_MARKER* marker : m_board->Markers() )
+        {
+            DRC_ITEM* drcItem = static_cast<DRC_ITEM*>( marker->GetRCItem().get() );
+            drcItem->SetViolatingRule( nullptr );
+        }
+    }
+
     m_rules.clear();
     m_rulesValid = false;
 
@@ -832,6 +845,17 @@ void DRC_ENGINE::InitEngine( const wxFileName& aRulePath )
             m_logReporter->Report( wxString::Format( wxT( "Create DRC provider: '%s'" ), provider->GetName() ) );
 
         provider->SetDRCEngine( this );
+    }
+
+    // Existing markers may hold raw pointers to DRC_RULEs we're about to destroy.
+    // Null them out so GetSeverity() falls back to the board design settings.
+    if( m_board )
+    {
+        for( PCB_MARKER* marker : m_board->Markers() )
+        {
+            DRC_ITEM* drcItem = static_cast<DRC_ITEM*>( marker->GetRCItem().get() );
+            drcItem->SetViolatingRule( nullptr );
+        }
     }
 
     m_rules.clear();

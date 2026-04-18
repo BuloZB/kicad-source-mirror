@@ -23,9 +23,23 @@
 
 #include <memory>
 #include <core/typeinfo.h>
+#include <api/schematic/schematic_types.pb.h>
 
 class EDA_ITEM;
+class SCH_SYMBOL;
+class SCH_SHEET;
+class SCH_SHEET_PATH;
 
 std::unique_ptr<EDA_ITEM> CreateItemForType( KICAD_T aType, EDA_ITEM* aContainer );
+
+bool PackSymbol( kiapi::schematic::types::SchematicSymbolInstance* aOutput, const SCH_SYMBOL* aInput,
+                 const SCH_SHEET_PATH& aPath );
+
+bool UnpackSymbol( SCH_SYMBOL* aOutput, const kiapi::schematic::types::SchematicSymbolInstance& aInput );
+
+bool PackSheet( kiapi::schematic::types::SheetSymbol* aOutput, const SCH_SHEET* aInput,
+                const SCH_SHEET_PATH& aPath );
+
+bool UnpackSheet( SCH_SHEET* aOutput, const kiapi::schematic::types::SheetSymbol& aInput );
 
 #endif //KICAD_API_SCH_UTILS_H

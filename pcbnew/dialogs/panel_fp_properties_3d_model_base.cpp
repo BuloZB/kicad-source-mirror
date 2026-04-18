@@ -140,7 +140,7 @@ PANEL_FP_PROPERTIES_3D_MODEL_BASE::PANEL_FP_PROPERTIES_3D_MODEL_BASE( wxWindow* 
 	m_extrusionLayerLabel->Wrap( -1 );
 	fgSizer1->Add( m_extrusionLayerLabel, 0, wxALL, 5 );
 
-	wxString m_extrusionLayerChoiceChoices[] = { _("Auto"), _("F.CrtYd"), _("F.Fab"), _("B.CrtYd"), _("B.Fab") };
+	wxString m_extrusionLayerChoiceChoices[] = { _("Auto"), _("Courtyard layer"), _("Fabrication layer") };
 	int m_extrusionLayerChoiceNChoices = sizeof( m_extrusionLayerChoiceChoices ) / sizeof( wxString );
 	m_extrusionLayerChoice = new wxChoice( m_extrusionSizer->GetStaticBox(), wxID_ANY, wxDefaultPosition, wxDefaultSize, m_extrusionLayerChoiceNChoices, m_extrusionLayerChoiceChoices, 0 );
 	m_extrusionLayerChoice->SetSelection( 0 );
@@ -184,7 +184,7 @@ PANEL_FP_PROPERTIES_3D_MODEL_BASE::PANEL_FP_PROPERTIES_3D_MODEL_BASE( wxWindow* 
 	fgSizer1->Add( m_buttonExportExtruded, 0, wxALIGN_RIGHT|wxALL, 5 );
 
 
-	m_extrusionSizer->Add( fgSizer1, 1, wxEXPAND, 3 );
+	m_extrusionSizer->Add( fgSizer1, 0, wxEXPAND, 3 );
 
 	wxBoxSizer* bSizer6;
 	bSizer6 = new wxBoxSizer( wxVERTICAL );
@@ -207,7 +207,7 @@ PANEL_FP_PROPERTIES_3D_MODEL_BASE::PANEL_FP_PROPERTIES_3D_MODEL_BASE( wxWindow* 
 	m_lowerPanel->Layout();
 	m_LowerSizer3D->Fit( m_lowerPanel );
 	m_splitter1->SplitHorizontally( m_upperPanel, m_lowerPanel, 400 );
-	bSizerMain3D->Add( m_splitter1, 1, wxEXPAND, 5 );
+	bSizerMain3D->Add( m_splitter1, 0, wxEXPAND, 5 );
 
 
 	this->SetSizer( bSizerMain3D );

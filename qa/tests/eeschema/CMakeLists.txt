@@ -107,6 +107,8 @@ set( QA_EESCHEMA_SRCS
     test_incremental_netlister.cpp
     test_legacy_power_symbols.cpp
     test_history_autosave_legacy.cpp
+    test_sch_api_enums.cpp
+    test_sch_api_proto.cpp
     test_sch_commit.cpp
     test_shape_corner_radius.cpp
     test_sch_group.cpp
@@ -138,6 +140,7 @@ set( QA_EESCHEMA_SRCS
     test_remote_symbol_download_security.cpp
     test_remote_symbol_import.cpp
     test_remote_symbol_load_from_payload.cpp
+    test_backannotate_unit_swap.cpp
     test_netlist_exporter_xml_stacked.cpp
     test_resolve_drivers.cpp
     test_saveas_copy_subsheets.cpp
