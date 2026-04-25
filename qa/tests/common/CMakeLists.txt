@@ -33,6 +33,7 @@ set( QA_COMMON_SRCS
     test_angle_item.cpp
 
     test_array_axis.cpp
+    test_atomic_save.cpp
     test_base_set.cpp
     test_bitmap_base.cpp
     test_clipboard.cpp
@@ -44,6 +45,8 @@ set( QA_COMMON_SRCS
     test_eda_text.cpp
     test_embedded_file_compress.cpp
     test_expand_text_vars.cpp
+    test_text_var_dependency.cpp
+    test_drawing_sheet_reactive.cpp
     test_file_history.cpp
     test_filename_resolver.cpp
     test_hotkey_store.cpp
@@ -87,6 +90,20 @@ set( QA_COMMON_SRCS
 
     libeval/test_numeric_evaluator.cpp
 
+    transline_calculations/test_coax.cpp
+    transline_calculations/test_coplanar.cpp
+    transline_calculations/test_dielectric_selector.cpp
+    transline_calculations/test_djordjevic_sarkar.cpp
+    transline_calculations/test_djordjevic_sarkar_integration.cpp
+    transline_calculations/test_coupled_microstrip.cpp
+    transline_calculations/test_coupled_stripline.cpp
+    transline_calculations/test_coupled_stripline_offset.cpp
+    transline_calculations/test_microstrip_cover.cpp
+    transline_calculations/test_rectwaveguide.cpp
+    transline_calculations/test_soldermask.cpp
+    transline_calculations/test_transline_roundtrip.cpp
+    transline_calculations/test_twistedpair.cpp
+
     io/test_csv.cpp
     io/altium/test_altium_parser.cpp
     io/altium/test_altium_parser_utils.cpp
@@ -98,6 +115,7 @@ set( QA_COMMON_SRCS
     io/pads/test_pads_common.cpp
     io/pads/test_pads_unit_converter.cpp
 
+    test_kigit_orphan_registry.cpp
     test_throttle.cpp
     view/test_zoom_controller.cpp
 
@@ -125,6 +143,7 @@ set( QA_COMMON_SRCS
 
     # Job tests
     test_job_export_sch_plot.cpp
+    test_job_sch_erc.cpp
     test_jobs_runner.cpp
 )
 

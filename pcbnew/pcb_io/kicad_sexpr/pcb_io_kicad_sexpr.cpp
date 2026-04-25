@@ -135,6 +135,7 @@ void FP_CACHE::Save( FOOTPRINT* aFootprintFilter )
 
             m_owner->SetOutputFormatter( &formatter );
             m_owner->Format( footprint.get() );
+            formatter.Finish();
         }
 
         m_cache_timestamp += fn.GetTimestamp();
@@ -1104,7 +1105,7 @@ void PCB_IO_KICAD_SEXPR::format( const PCB_SHAPE* aShape ) const
                       formatInternalUnits( aShape->GetLocalSolderMaskMargin().value() ).c_str() );
     }
 
-    if( aShape->GetNetCode() > 0 )
+    if( !( m_ctl & CTL_OMIT_PAD_NETS ) && aShape->GetNetCode() > 0 )
         m_out->Print( "(net %s)", m_out->Quotew( aShape->GetNetname() ).c_str() );
 
     KICAD_FORMAT::FormatUuid( m_out, aShape->m_Uuid );
@@ -1505,7 +1506,9 @@ void PCB_IO_KICAD_SEXPR::format( const FOOTPRINT* aFootprint ) const
         m_out->Print( "(overall_height %s)", formatInternalUnits( body->m_height ).c_str() );
         m_out->Print( "(body_pcb_gap %s)", formatInternalUnits( body->m_standoff ).c_str() );
 
-        if( body->m_layer != UNDEFINED_LAYER )
+        if( body->m_layer == UNSELECTED_LAYER )
+            m_out->Print( "(layer pad_bbox)" );
+        else if( body->m_layer != UNDEFINED_LAYER )
             m_out->Print( "(layer %s)", m_out->Quotew( LSET::Name( body->m_layer ) ).c_str() );
         else
             m_out->Print( "(layer auto)" );
@@ -2489,15 +2492,26 @@ void PCB_IO_KICAD_SEXPR::format( const PCB_GROUP* aGroup ) const
 {
     wxArrayString memberIds;
 
+    // Validate member pointers against the board cache to avoid use-after-free on dangling
+    // pointers (e.g. when a group held a reference to a deleted item).  This validation only
+    // applies when the group itself is part of m_board; for groups created off-board (e.g. a
+    // DeepClone() used by the clipboard) the cache contains the originals, not our clones, so
+    // skip the validation in that case and trust the member pointers.
+    bool                                validateAgainstBoard = false;
+    std::unordered_set<const EDA_ITEM*> validPtrs;
+
     if( m_board )
     {
         const auto& cache = m_board->GetItemByIdCache();
 
-        std::unordered_set<const EDA_ITEM*> validPtrs;
-
         for( const auto& [uuid, item] : cache )
             validPtrs.insert( item );
 
+        validateAgainstBoard = validPtrs.count( aGroup ) > 0;
+    }
+
+    if( validateAgainstBoard )
+    {
         for( EDA_ITEM* member : aGroup->GetItems() )
         {
             if( validPtrs.count( member ) )
@@ -2882,7 +2896,8 @@ void PCB_IO_KICAD_SEXPR::format( const PCB_TRACK* aTrack ) const
         }
     }
 
-    m_out->Print( "(net %s)", m_out->Quotew( aTrack->GetNetname() ).c_str() );
+    if( !( m_ctl & CTL_OMIT_PAD_NETS ) )
+        m_out->Print( "(net %s)", m_out->Quotew( aTrack->GetNetname() ).c_str() );
 
     KICAD_FORMAT::FormatUuid( m_out, aTrack->m_Uuid );
     m_out->Print( ")" );
@@ -2893,8 +2908,11 @@ void PCB_IO_KICAD_SEXPR::format( const ZONE* aZone ) const
 {
     m_out->Print( "(zone" );
 
-    if( aZone->IsOnCopperLayer() && !aZone->GetIsRuleArea() && aZone->GetNetCode() > 0 )
+    if( !( m_ctl & CTL_OMIT_PAD_NETS ) && aZone->IsOnCopperLayer() && !aZone->GetIsRuleArea()
+            && aZone->GetNetCode() > 0 )
+    {
         m_out->Print( "(net %s)", m_out->Quotew( aZone->GetNetname() ).c_str() );
+    }
 
     if( aZone->IsLocked() )
         KICAD_FORMAT::FormatBool( m_out, "locked", true );
@@ -3459,9 +3477,9 @@ void PCB_IO_KICAD_SEXPR::FootprintSave( const wxString& aLibraryPath, const FOOT
 
     if( it != m_cache->GetFootprints().end() )
     {
-        wxLogTrace( traceKicadPcbPlugin, wxT( "Removing footprint file '%s'." ), fullPath );
+        // Save() below writes atomically via sibling temp + rename, so no pre-delete.
+        wxLogTrace( traceKicadPcbPlugin, wxT( "Replacing footprint file '%s'." ), fullPath );
         m_cache->GetFootprints().erase( footprintName );
-        wxRemoveFile( fullPath );
     }
 
     // I need my own copy for the cache
@@ -3483,6 +3501,11 @@ void PCB_IO_KICAD_SEXPR::FootprintSave( const wxString& aLibraryPath, const FOOT
     // Detach it from the board and its group
     footprint->SetParent( nullptr );
     footprint->SetParentGroup( nullptr );
+
+    // Now that the clone is detached from its parent board, any m_netinfo pointers its
+    // descendants still carry reference NETINFO_ITEMs owned by that board and may dangle.
+    // Force them all to the board-independent ORPHANED singleton before serialization.
+    footprint->ClearAllNets();
 
     wxLogTrace( traceKicadPcbPlugin, wxT( "Creating s-expr footprint file '%s'." ), fullPath );
     m_cache->GetFootprints().insert( footprintName,

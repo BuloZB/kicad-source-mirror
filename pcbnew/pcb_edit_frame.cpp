@@ -29,6 +29,7 @@
 #include <wx/log.h>
 #include <wx/filename.h>
 #include <wx/filedlg.h>
+#include <wx/hyperlink.h>
 #include <wx/socket.h>
 #include <wx/wupdlock.h>
 
@@ -68,6 +69,9 @@
 #include <pcb_track.h>
 #include <layer_pairs.h>
 #include <drawing_sheet/ds_proxy_view_item.h>
+#include <board_text_var_adapter.h>
+#include <text_var_dependency.h>
+#include <view/view.h>
 #include <wildcards_and_files_ext.h>
 #include <functional>
 #include <pcb_barcode.h>
@@ -302,6 +306,18 @@ PCB_EDIT_FRAME::PCB_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
 
     CreateInfoBar();
 
+    // Secondary infobar stacked above the main one.  Load-time notices (such as
+    // the WRL -> STEP migration prompt) belong here so they aren't clobbered by
+    // the main infobar's read-only warnings, DRC rule errors, etc.
+#if defined( __WXOSX_MAC__ )
+    m_loadNoticeInfoBar = new WX_INFOBAR( GetToolCanvas() );
+#else
+    m_loadNoticeInfoBar = new WX_INFOBAR( this, &m_auimgr );
+    m_auimgr.AddPane( m_loadNoticeInfoBar,
+                      EDA_PANE().InfoBar().Name( wxS( "LoadNoticeInfoBar" ) ).Top().Layer( 1 )
+                              .Row( 1 ) );
+#endif
+
     unsigned int auiFlags = wxAUI_MGR_DEFAULT;
 #if !defined( _WIN32 )
     // Windows cannot redraw the UI fast enough during a live resize and may lead to all kinds
@@ -404,6 +420,16 @@ PCB_EDIT_FRAME::PCB_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
     // The selection filter doesn't need to grow in the vertical direction when docked
     m_auimgr.GetPane( "SelectionFilter" ).dock_proportion = 0;
     FinishAUIInitialization();
+
+    // FinishAUIInitialization only hides the primary "InfoBar" pane; the
+    // stacked load-notice bar has to be hidden explicitly.
+#if !defined( __WXOSX_MAC__ )
+    if( wxAuiPaneInfo& pane = m_auimgr.GetPane( wxS( "LoadNoticeInfoBar" ) ); pane.IsOk() )
+    {
+        pane.Hide();
+        m_auimgr.Update();
+    }
+#endif
 
     if( aui_cfg.right_panel_width > 0 )
     {
@@ -739,6 +765,10 @@ void PCB_EDIT_FRAME::OnCrossProbeFlashTimer( wxTimerEvent& aEvent )
 
 PCB_EDIT_FRAME::~PCB_EDIT_FRAME()
 {
+    // PCB_BASE_FRAME's dtor deletes m_pcb; canvas children outlive it.  Drop
+    // every cached TEXT_VAR_TRACKER* before the tracker is freed.
+    detachTextVarTracker();
+
     if( ADVANCED_CFG::GetCfg().m_ShowEventCounters )
     {
         // Stop the timer during destruction early to avoid potential event race conditions (that
@@ -775,11 +805,32 @@ PCB_EDIT_FRAME::~PCB_EDIT_FRAME()
 }
 
 
+void PCB_EDIT_FRAME::detachTextVarTracker()
+{
+    if( GetCanvas() )
+    {
+        if( DS_PROXY_VIEW_ITEM* sheet = GetCanvas()->GetDrawingSheet() )
+            sheet->AttachToTracker( nullptr );
+    }
+
+    if( m_textVarListenerTracker && m_textVarListenerHandle != TEXT_VAR_TRACKER::INVALID_LISTENER )
+    {
+        m_textVarListenerTracker->RemoveInvalidateListener( m_textVarListenerHandle );
+        m_textVarListenerHandle = TEXT_VAR_TRACKER::INVALID_LISTENER;
+        m_textVarListenerTracker = nullptr;
+    }
+}
+
+
 void PCB_EDIT_FRAME::SetBoard( BOARD* aBoard, bool aBuildConnectivity,
                                PROGRESS_REPORTER* aReporter )
 {
+    // PCB_BASE_FRAME::SetBoard deletes m_pcb; detach tracker consumers first.
     if( m_pcb )
+    {
+        detachTextVarTracker();
         m_pcb->ClearProject();
+    }
 
     PCB_BASE_EDIT_FRAME::SetBoard( aBoard, aReporter );
 
@@ -882,6 +933,55 @@ void PCB_EDIT_FRAME::SetPageSettings( const PAGE_INFO& aPageSettings )
 
     // PCB_DRAW_PANEL_GAL takes ownership of the drawing-sheet
     GetCanvas()->SetDrawingSheet( drawingSheet );
+
+    // Reactive title-block repaint: register the proxy with the BOARD's
+    // text-var tracker so source changes fan out to a repaint. The one-time
+    // listener installation is idempotent; calling AddInvalidateListener
+    // here each time would accumulate stale listeners across SetPageSettings
+    // calls, which is why the listener check below is guarded.
+    if( BOARD* board = GetBoard() )
+    {
+        if( BOARD_TEXT_VAR_ADAPTER* adapter = board->GetTextVarAdapter() )
+        {
+            TEXT_VAR_TRACKER* tracker = &adapter->Tracker();
+
+            drawingSheet->AttachToTracker( tracker );
+
+            // Project reload / board swap can point GetBoard() at a new
+            // tracker; detach from the previous one first so we don't leak
+            // a stale lambda that still captures `this`.
+            if( m_textVarListenerTracker != tracker
+                && m_textVarListenerHandle != TEXT_VAR_TRACKER::INVALID_LISTENER )
+            {
+                m_textVarListenerTracker->RemoveInvalidateListener( m_textVarListenerHandle );
+                m_textVarListenerHandle = TEXT_VAR_TRACKER::INVALID_LISTENER;
+                m_textVarListenerTracker = nullptr;
+            }
+
+            if( m_textVarListenerHandle == TEXT_VAR_TRACKER::INVALID_LISTENER )
+            {
+                KIGFX::VIEW* view = GetCanvas()->GetView();
+                m_textVarListenerTracker = tracker;
+                m_textVarListenerHandle = tracker->AddInvalidateListener(
+                        [this, view]( EDA_ITEM* aDep, const TEXT_VAR_REF_KEY& )
+                        {
+                            if( !aDep )
+                                return;
+
+                            DS_PROXY_VIEW_ITEM* current = GetCanvas()->GetDrawingSheet();
+
+                            if( aDep == current )
+                            {
+                                view->Update( current, KIGFX::REPAINT );
+                                return;
+                            }
+
+                            if( aDep->IsBOARD_ITEM() )
+                                view->Update( aDep, KIGFX::REPAINT );
+                        } );
+            }
+        }
+    }
 }
 
 
@@ -1611,6 +1711,11 @@ void PCB_EDIT_FRAME::ShowBoardSetupDialog( const wxString& aInitialPage, wxWindo
         Prj().IncrementTextVarsTicker();
         Prj().IncrementNetclassesTicker();
 
+        // CROSS_REF keys deliberately excluded — those are driven by per-item
+        // BOARD_COMMIT changes.
+        if( BOARD_TEXT_VAR_ADAPTER* adapter = GetBoard()->GetTextVarAdapter() )
+            adapter->Tracker().InvalidateProjectScoped();
+
         PCBNEW_SETTINGS* settings = GetPcbNewSettings();
         static LSET      maskAndPasteLayers = LSET( { F_Mask, F_Paste, B_Mask, B_Paste } );
 
@@ -1901,15 +2006,48 @@ void PCB_EDIT_FRAME::OnBoardLoaded()
 
     GetBoard()->InitializeClearanceCache();
 
-    // Offer to migrate obsolete WRL 3D model references to current STEP models.
-    // Shown only when unresolvable WRL paths are present and the user hasn't
-    // opted out of the prompt; the Tools menu exposes the dialog on demand.
-    if( COMMON_SETTINGS* commonSettings = Pgm().GetCommonSettings();
-        commonSettings && !commonSettings->m_DoNotShowAgain.migrate_wrl_prompt
-        && DIALOG_MIGRATE_3D_MODELS::BoardHasUnresolvedWrlReferences( this ) )
+    // Migrate obsolete WRL 3D model references to current STEP models.  Only
+    // runs in the GUI: CLI and scripting load paths must not mutate board
+    // state on load.  The STEP exporter does its own WRL->STEP substitution at
+    // export time via the --subst-models flag, and the 3D cache quietly falls
+    // back to sibling STEP files for missing WRLs in headless contexts.
+    if( Pgm().IsGUI() )
     {
-        DIALOG_MIGRATE_3D_MODELS dlg( this );
-        dlg.ShowModal();
+        // Silently replace references whose filename uniquely identifies a
+        // STEP sibling.  Leaves ambiguous cases for the infobar below.
+        DIALOG_MIGRATE_3D_MODELS::AutoMigrateByFilename( this );
+
+        const int unresolved = DIALOG_MIGRATE_3D_MODELS::CountUnresolvedWrlReferences( this );
+
+        if( unresolved > 0 )
+        {
+            wxString msg = wxString::Format( wxPLURAL( "%d WRL 3D model could not be matched "
+                                                       "to an equivalent STEP model.",
+                                                       "%d WRL 3D models could not be matched "
+                                                       "to equivalent STEP models.",
+                                                       unresolved ),
+                                             unresolved );
+
+            wxHyperlinkCtrl* link = new wxHyperlinkCtrl( m_loadNoticeInfoBar, wxID_ANY,
+                                                         _( "Show options" ), wxEmptyString );
+
+            link->Bind( wxEVT_COMMAND_HYPERLINK, std::function<void( wxHyperlinkEvent& )>(
+                    [this]( wxHyperlinkEvent& )
+                    {
+                        DIALOG_MIGRATE_3D_MODELS dlg( this );
+                        dlg.ShowModal();
+
+                        // Dismiss the infobar if nothing remains to resolve;
+                        // otherwise leave it so the user can try again.
+                        if( DIALOG_MIGRATE_3D_MODELS::CountUnresolvedWrlReferences( this ) == 0 )
+                            m_loadNoticeInfoBar->Dismiss();
+                    } ) );
+
+            m_loadNoticeInfoBar->RemoveAllButtons();
+            m_loadNoticeInfoBar->AddButton( link );
+            m_loadNoticeInfoBar->AddCloseButton();
+            m_loadNoticeInfoBar->ShowMessage( msg, wxICON_INFORMATION );
+        }
     }
 
     UpdateTitle();

@@ -121,6 +121,7 @@ set( KICOMMON_SRCS
     git/kicad_git_common.cpp
     git/kicad_git_errors.cpp
     git/git_backend.cpp
+    git/kigit_orphan_registry.cpp
     git/libgit_backend.cpp
 
     # Jobs
@@ -253,6 +254,7 @@ set( KICOMMON_SRCS
     build_version.cpp
     cli_progress_reporter.cpp
     common.cpp
+    text_var_dependency.cpp
     config_params.cpp
     confirm.cpp
     dialog_shim.cpp
@@ -704,10 +706,15 @@ set( COMMON_IO_SRCS
 
 set ( COMMON_TRANSLINE_CALCULATION_SRCS
     transline_calculations/transline_calculation_base.cpp
+    transline_calculations/dielectric_djordjevic_sarkar.cpp
     transline_calculations/microstrip.cpp
     transline_calculations/coupled_microstrip.cpp
     transline_calculations/stripline.cpp
     transline_calculations/coupled_stripline.cpp
+    transline_calculations/coax.cpp
+    transline_calculations/coplanar.cpp
+    transline_calculations/rectwaveguide.cpp
+    transline_calculations/twistedpair.cpp
     )
 
 set( COMMON_IMPORT_GFX_SRCS
@@ -955,6 +962,7 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/teardrop/teardrop_parameters.cpp     #needed by board_design_settings.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/router/pns_meander.cpp               #needed by board_design_settings.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/board.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/board_text_var_adapter.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/component_classes/component_class.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/component_classes/component_class_assignment_rule.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/component_classes/component_class_cache_proxy.cpp

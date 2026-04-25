@@ -69,13 +69,16 @@ set( QA_EESCHEMA_SRCS
     erc/test_erc_wire_bus_entry.cpp
     erc/test_erc_ground_pins.cpp
     erc/test_erc_bus_member_label_local_pins.cpp
+    erc/test_erc_marker_deduplication.cpp
 
+    test_schematic_text_var_reactive.cpp
     test_annotation_refdes_tracker_units.cpp
     test_annotation_units_conflicts.cpp
     test_annotation_units_integration.cpp
     test_connectivity_algo.cpp
     test_issue18119_bus_hierarchy.cpp
     test_issue18299_bus_member_rename.cpp
+    test_issue23840_bus_group_to_vector.cpp
     test_issue20173_paste_subsheet.cpp
     test_issue22286_pin_alternate.cpp
     test_issue22620_group_annotation.cpp
@@ -87,6 +90,7 @@ set( QA_EESCHEMA_SRCS
     test_issue23403_shared_subsheet_screen.cpp
     test_issue22576_subsheet_standalone.cpp
     test_issue22694_global_hier_label.cpp
+    test_issue24044_expression_net_names.cpp
     test_issue23719_global_label_chain.cpp
     test_issue16915_bus_netclass.cpp
     test_nc_pin_connectivity.cpp
@@ -108,6 +112,7 @@ set( QA_EESCHEMA_SRCS
     test_legacy_power_symbols.cpp
     test_history_autosave_legacy.cpp
     test_sch_api_enums.cpp
+    test_sch_api_hittest.cpp
     test_sch_api_proto.cpp
     test_sch_commit.cpp
     test_shape_corner_radius.cpp
