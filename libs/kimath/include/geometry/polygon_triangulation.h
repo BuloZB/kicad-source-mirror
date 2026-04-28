@@ -890,8 +890,8 @@ private:
             if( bridge )
             {
                 VERTEX* bridgeReverse = bridge->split( hi.leftmost );
-                filterPoints( aOuterRing, aOuterRing->next );
                 filterPoints( bridgeReverse, bridgeReverse->next );
+                aOuterRing = filterPoints( bridge, bridge->next );
             }
             else
             {
@@ -906,10 +906,10 @@ private:
     /**
      * Remove consecutive duplicate vertices from the linked list.
      */
-    void filterPoints( VERTEX* aStart, VERTEX* aEnd = nullptr )
+    VERTEX* filterPoints( VERTEX* aStart, VERTEX* aEnd = nullptr )
     {
         if( !aStart )
-            return;
+            return aStart;
 
         if( !aEnd )
             aEnd = aStart;
@@ -923,10 +923,15 @@ private:
 
             if( *p == *p->next )
             {
-                p->next->remove();
+                VERTEX* toRemove = p->next;
+                
+                if( toRemove == aEnd )
+                    aEnd = p;
+
+                toRemove->remove();
 
                 if( p == p->next )
-                    return;
+                    return p;
 
                 p = p->prev;
                 again = true;
@@ -936,7 +941,10 @@ private:
                 p = p->next;
             }
         } while( again || p != aEnd );
+
+        return aEnd;
     }
+
 
     /**
      * Find a vertex on the outer ring visible from the hole's leftmost vertex

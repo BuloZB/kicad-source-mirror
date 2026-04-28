@@ -40,6 +40,7 @@
 class BOARD;
 class BOARD_ITEM_CONTAINER;
 class FOOTPRINT;
+class NETINFO_ITEM;
 class PAD;
 class PCB_SHAPE;
 class PCB_TEXT;
@@ -155,16 +156,25 @@ struct FILE_DATA
 } // namespace SPRINT_LAYOUT
 
 
+class NETINFO_ITEM;
+
 class SPRINT_LAYOUT_PARSER
 {
 public:
     SPRINT_LAYOUT_PARSER();
     ~SPRINT_LAYOUT_PARSER();
 
-    bool Parse( const wxString& aFileName );
+    // Parse full Sprint Layout board files (.lay6 / .lay) into internal file data
+    bool ParseBoard( const wxString& aFileName );
 
-    BOARD* CreateBoard( std::map<wxString, std::unique_ptr<FOOTPRINT>>& aFootprintMap,
-                         size_t aBoardIndex = 0 );
+    // Parse a macro (LMK) file with objects in BOARD_DATA with index 0
+    bool ParseMacroFile( const wxString& aFileName );
+
+    // Create a BOARD from BOARD_DATA at the given index, and populate the provided footprint map with any footprints found in the file.
+    BOARD* CreateBoard( std::map<wxString, std::unique_ptr<FOOTPRINT>>& aFootprintMap, size_t aBoardIndex = 0 );
+
+    // Create a single FOOTPRINT from the board at index 0
+    FOOTPRINT* CreateFootprint();
 
     const SPRINT_LAYOUT::FILE_DATA& GetFileData() const { return m_fileData; }
 
@@ -181,7 +191,9 @@ private:
     void        skip( size_t aBytes );
     void        seek( int aBytes );
 
+    void parseFileStart( const wxString& aFileName );
     void parseBoardHeader( SPRINT_LAYOUT::BOARD_DATA& aBoard );
+    void parseObjectsList( SPRINT_LAYOUT::BOARD_DATA& aBoard );
     void parseObject( SPRINT_LAYOUT::OBJECT& aObject, bool aIsTextChild = false );
     void parseTrailer();
 
@@ -191,16 +203,25 @@ private:
     VECTOR2I     sprintToKicadPos( float aX, float aY ) const;
     wxString     convertString( const std::string& aStr ) const;
 
-    void processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj );
+    bool          layerHasGroundPlane( PCB_LAYER_ID aLayer, const uint8_t aGroundPlane[7] ) const;
+
+    NETINFO_ITEM* resolveItemNet( BOARD* aBoard, const SPRINT_LAYOUT::OBJECT& aObj, PCB_LAYER_ID aLayer,
+                                  const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet ) const;
+
+    void processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
+                     const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
 
     void processCircle( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments );
+                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                        const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
 
     void processLine( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments );
+                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                      const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
 
     void processPoly( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments );
+                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                      const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
 
     void processText( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj );
 

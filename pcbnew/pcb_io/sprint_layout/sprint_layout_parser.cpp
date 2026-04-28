@@ -195,7 +195,73 @@ void SPRINT_LAYOUT_PARSER::seek( int aBytes )
 // Parsing
 // ============================================================================
 
-bool SPRINT_LAYOUT_PARSER::Parse( const wxString& aFileName )
+
+bool SPRINT_LAYOUT_PARSER::ParseBoard( const wxString& aFileName )
+{
+    parseFileStart( aFileName );
+
+    uint32_t numBoards = readUint32();
+
+    if( numBoards == 0 || numBoards > 100 )
+        THROW_IO_ERROR( _( "Invalid board count in Sprint Layout file" ) );
+
+    m_fileData.boards.resize( numBoards );
+
+    for( uint32_t b = 0; b < numBoards; b++ )
+    {
+        SPRINT_LAYOUT::BOARD_DATA& boardData = m_fileData.boards[b];
+        parseBoardHeader( boardData );
+
+        uint32_t numObjects = readUint32();
+
+        if( numObjects > MAX_OBJECTS )
+            THROW_IO_ERROR( _( "Too many objects in Sprint Layout board" ) );
+
+        boardData.objects.resize( numObjects );
+
+        for( uint32_t i = 0; i < numObjects; i++ )
+            parseObject( boardData.objects[i] );
+
+        uint32_t numConnections = 0;
+
+        for( auto& obj : boardData.objects )
+        {
+            if( obj.type == SPRINT_LAYOUT::OBJ_THT_PAD || obj.type == SPRINT_LAYOUT::OBJ_SMD_PAD )
+                numConnections++;
+        }
+
+        // Read connection records (one per pad object)
+        for( uint32_t c = 0; c < numConnections; c++ )
+        {
+            uint32_t connCount = readUint32();
+
+            // Skip the connection data for now
+            skip( connCount * sizeof( uint32_t ) );
+        }
+    }
+
+    parseTrailer();
+
+    return true;
+}
+
+
+bool SPRINT_LAYOUT_PARSER::ParseMacroFile( const wxString& aFileName )
+{
+    // Parse the macro data into BOARD_DATA
+    SPRINT_LAYOUT::BOARD_DATA data;
+    data.name = wxFileNameFromPath( aFileName ).BeforeLast( '.' );
+
+    parseFileStart( aFileName );
+    parseObjectsList( data );
+
+    m_fileData.boards = { data };
+
+    return true;
+}
+
+
+void SPRINT_LAYOUT_PARSER::parseFileStart( const wxString& aFileName )
 {
     wxFFileInputStream stream( aFileName );
 
@@ -226,38 +292,12 @@ bool SPRINT_LAYOUT_PARSER::Parse( const wxString& aFileName )
     if( m_fileData.version > 6 || magic1 != 0x33 || magic2 != 0xAA || magic3 != 0xFF )
         THROW_IO_ERROR( _( "Invalid Sprint Layout file header" ) );
 
-    uint32_t numBoards = readUint32();
-
-    if( numBoards == 0 || numBoards > 100 )
-        THROW_IO_ERROR( _( "Invalid board count in Sprint Layout file" ) );
-
-    m_fileData.boards.resize( numBoards );
-
-    for( uint32_t b = 0; b < numBoards; b++ )
+    if( m_fileData.version < 5 )
     {
-        parseBoardHeader( m_fileData.boards[b] );
-
-        uint32_t numConnections = 0;
-
-        for( auto& obj : m_fileData.boards[b].objects )
-        {
-            if( obj.type == SPRINT_LAYOUT::OBJ_THT_PAD || obj.type == SPRINT_LAYOUT::OBJ_SMD_PAD )
-                numConnections++;
-        }
-
-        // Read connection records (one per pad object)
-        for( uint32_t c = 0; c < numConnections; c++ )
-        {
-            uint32_t connCount = readUint32();
-
-            // Skip the connection data for now
-            skip( connCount * sizeof( uint32_t ) );
-        }
+        THROW_IO_ERROR( wxString::Format( _( "Current file appears to be generated in Sprint Layout %d. Only version 5 "
+                                             "and 6 files are supported. " ),
+                                          m_fileData.version ) );
     }
-
-    parseTrailer();
-
-    return true;
 }
 
 
@@ -304,11 +344,15 @@ void SPRINT_LAYOUT_PARSER::parseBoardHeader( SPRINT_LAYOUT::BOARD_DATA& aBoard )
     aBoard.center_y = readInt32();
 
     aBoard.is_multilayer = readUint8();
+}
 
+
+void SPRINT_LAYOUT_PARSER::parseObjectsList( SPRINT_LAYOUT::BOARD_DATA& aBoard )
+{
     uint32_t numObjects = readUint32();
 
     if( numObjects > MAX_OBJECTS )
-        THROW_IO_ERROR( _( "Too many objects in Sprint Layout board" ) );
+        THROW_IO_ERROR( _( "Too many objects in Sprint Layout file" ) );
 
     aBoard.objects.resize( numObjects );
 
@@ -388,8 +432,8 @@ void SPRINT_LAYOUT_PARSER::parseObject( SPRINT_LAYOUT::OBJECT& aObj, bool aIsTex
         for( uint32_t i = 0; i < childCount; i++ )
             parseObject( aObj.text_children[i], true );
 
-        // Component data follows for text objects that define a component
-        if( aObj.tht_shape == 1 )
+        // In v6, component data follows for text objects that define a component
+        if( m_fileData.version >= 6 && aObj.tht_shape == 1 )
         {
             aObj.component.valid = true;
             aObj.component.off_x = readFloat();
@@ -507,6 +551,51 @@ wxString SPRINT_LAYOUT_PARSER::convertString( const std::string& aStr ) const
 }
 
 
+bool SPRINT_LAYOUT_PARSER::layerHasGroundPlane( PCB_LAYER_ID aLayer, const uint8_t aGroundPlane[7] ) const
+{
+    // Ground plane index map mirrors CreateBoard()'s groundPlaneMap
+    switch( aLayer )
+    {
+    case F_Cu:   return aGroundPlane[0] != 0;
+    case B_Cu:   return aGroundPlane[2] != 0;
+    case In1_Cu: return aGroundPlane[4] != 0;
+    case In2_Cu: return aGroundPlane[5] != 0;
+    default:     return false;
+    }
+}
+
+
+NETINFO_ITEM* SPRINT_LAYOUT_PARSER::resolveItemNet( BOARD* aBoard, const SPRINT_LAYOUT::OBJECT& aObj,
+                                                    PCB_LAYER_ID aLayer, const uint8_t aGroundPlane[7],
+                                                    NETINFO_ITEM* aGndPlaneNet ) const
+{
+    if( !aBoard )
+        return nullptr;
+
+    if( aObj.clearance == 0 && aGndPlaneNet != nullptr && aObj.net_name.empty()
+        && layerHasGroundPlane( aLayer, aGroundPlane ) )
+    {
+        return aGndPlaneNet;
+    }
+
+    if( !aObj.net_name.empty() )
+    {
+        wxString      netName = convertString( aObj.net_name );
+        NETINFO_ITEM* net = aBoard->FindNet( netName );
+
+        if( !net )
+        {
+            net = new NETINFO_ITEM( aBoard, netName );
+            aBoard->Add( net );
+        }
+
+        return net;
+    }
+
+    return nullptr;
+}
+
+
 BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOOTPRINT>>& aFootprintMap,
                                           size_t                                          aBoardIndex )
 {
@@ -533,8 +622,64 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOO
     else
         board->SetCopperLayerCount( 2 );
 
+    const wxString gndPlaneNetName( "GND_PLANE" );
+    NETINFO_ITEM*  gndPlaneNet = nullptr;
+
+    // Create ground plane zones for layers where ground plane is enabled.
+    // Sprint Layout stores a per-layer flag in the board header.
+    // Indices: 0=C1(F.Cu), 2=C2(B.Cu), 4=I1(In1.Cu), 5=I2(In2.Cu)
+    static const struct
+    {
+        int          index;
+        PCB_LAYER_ID layer;
+    } groundPlaneMap[] = {
+        { 0, F_Cu },
+        { 2, B_Cu },
+        { 4, In1_Cu },
+        { 5, In2_Cu },
+    };
+
+    for( const auto& gp : groundPlaneMap )
+    {
+        if( boardData.ground_plane[gp.index] == 0 )
+            continue;
+
+        int w = sprintToKicadCoord( static_cast<float>( boardData.size_x ) );
+        int h = sprintToKicadCoord( static_cast<float>( boardData.size_y ) );
+
+        if( w <= 0 || h <= 0 )
+            continue;
+
+        if( gndPlaneNet == nullptr )
+        {
+            gndPlaneNet = new NETINFO_ITEM( board.get(), gndPlaneNetName );
+            board->Add( gndPlaneNet );
+        }
+
+        ZONE* zone = new ZONE( board.get() );
+        zone->SetLayer( gp.layer );
+        zone->SetIsRuleArea( false );
+        zone->SetZoneName( wxString::Format( wxS( "GND_PLANE_%s" ), board->GetLayerName( gp.layer ) ) );
+        zone->SetLocalClearance( std::optional<int>( pcbIUScale.mmToIU( 0.3 ) ) );
+        zone->SetThermalReliefGap( pcbIUScale.mmToIU( 0.5 ) );
+        zone->SetThermalReliefSpokeWidth( pcbIUScale.mmToIU( 0.5 ) );
+        zone->SetAssignedPriority( 0 );
+        zone->SetIslandRemovalMode( ISLAND_REMOVAL_MODE::NEVER );
+        zone->SetNet( gndPlaneNet );
+
+        SHAPE_POLY_SET outline;
+        outline.NewOutline();
+        outline.Append( 0, 0 );
+        outline.Append( w, 0 );
+        outline.Append( w, h );
+        outline.Append( 0, h );
+
+        zone->AddPolygon( outline.COutline( 0 ) );
+        board->Add( zone );
+    }
+
     // Maps component_id to FOOTPRINT for grouping component-owned objects
-    std::map<uint16_t, FOOTPRINT*> componentMap;
+    std::map<uint16_t, FOOTPRINT*>     componentMap;
     std::vector<std::vector<VECTOR2I>> outlineSegments;
 
     auto getOrCreateComponentFootprint = [&]( const SPRINT_LAYOUT::OBJECT& aObj ) -> FOOTPRINT*
@@ -564,7 +709,15 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOO
         if( aObj.type == SPRINT_LAYOUT::OBJ_TEXT && aObj.component.valid )
         {
             if( !aObj.component.comment.empty() )
-                fp->GetField( FIELD_T::DESCRIPTION )->SetText( convertString( aObj.component.comment ) );
+            {
+                wxString comment = convertString( aObj.component.comment );
+                fp->GetField( FIELD_T::DESCRIPTION )->SetText( comment );
+                fp->SetValue( comment );
+            }
+            else if( !aObj.net_name.empty() )
+            {
+                fp->SetValue( convertString( aObj.net_name ) );
+            }
 
             if( !aObj.component.package.empty() )
                 fp->SetLibDescription( convertString( aObj.component.package ) );
@@ -599,19 +752,19 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOO
         {
         case SPRINT_LAYOUT::OBJ_THT_PAD:
         case SPRINT_LAYOUT::OBJ_SMD_PAD:
-            processPad( container, obj );
+            processPad( container, obj, boardData.ground_plane, gndPlaneNet );
             break;
 
         case SPRINT_LAYOUT::OBJ_LINE:
-            processLine( container, obj, outlineSegments );
+            processLine( container, obj, outlineSegments, boardData.ground_plane, gndPlaneNet );
             break;
 
         case SPRINT_LAYOUT::OBJ_POLY:
-            processPoly( container, obj, outlineSegments );
+            processPoly( container, obj, outlineSegments, boardData.ground_plane, gndPlaneNet );
             break;
 
         case SPRINT_LAYOUT::OBJ_CIRCLE:
-            processCircle( container, obj, outlineSegments );
+            processCircle( container, obj, outlineSegments, boardData.ground_plane, gndPlaneNet );
             break;
 
         case SPRINT_LAYOUT::OBJ_TEXT:
@@ -646,52 +799,6 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOO
 
     buildOutline( board.get(), outlineSegments, boardData );
 
-    // Create ground plane zones for layers where ground plane is enabled.
-    // Sprint Layout stores a per-layer flag in the board header.
-    // Indices: 0=C1(F.Cu), 2=C2(B.Cu), 4=I1(In1.Cu), 5=I2(In2.Cu)
-    static const struct
-    {
-        int          index;
-        PCB_LAYER_ID layer;
-    } groundPlaneMap[] = {
-        { 0, F_Cu },
-        { 2, B_Cu },
-        { 4, In1_Cu },
-        { 5, In2_Cu },
-    };
-
-    for( const auto& gp : groundPlaneMap )
-    {
-        if( boardData.ground_plane[gp.index] == 0 )
-            continue;
-
-        int w = sprintToKicadCoord( static_cast<float>( boardData.size_x ) );
-        int h = sprintToKicadCoord( static_cast<float>( boardData.size_y ) );
-
-        if( w <= 0 || h <= 0 )
-            continue;
-
-        ZONE* zone = new ZONE( board.get() );
-        zone->SetLayer( gp.layer );
-        zone->SetIsRuleArea( false );
-        zone->SetZoneName( wxString::Format( wxS( "GND_PLANE_%s" ),
-                                              board->GetLayerName( gp.layer ) ) );
-        zone->SetLocalClearance( std::optional<int>( pcbIUScale.mmToIU( 0.3 ) ) );
-        zone->SetThermalReliefGap( pcbIUScale.mmToIU( 0.5 ) );
-        zone->SetThermalReliefSpokeWidth( pcbIUScale.mmToIU( 0.5 ) );
-        zone->SetAssignedPriority( 0 );
-
-        SHAPE_POLY_SET outline;
-        outline.NewOutline();
-        outline.Append( 0, 0 );
-        outline.Append( w, 0 );
-        outline.Append( w, h );
-        outline.Append( 0, h );
-
-        zone->AddPolygon( outline.COutline( 0 ) );
-        board->Add( zone );
-    }
-
     // Center the board content on the page
     BOX2I bbox = board->ComputeBoundingBox( true );
 
@@ -714,17 +821,89 @@ BOARD* SPRINT_LAYOUT_PARSER::CreateBoard( std::map<wxString, std::unique_ptr<FOO
 }
 
 
-void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj )
+FOOTPRINT* SPRINT_LAYOUT_PARSER::CreateFootprint()
 {
-    BOARD* board = aContainer ? aContainer->GetBoard() : nullptr;
+    if( m_fileData.boards.empty() )
+        return nullptr;
+
+    const SPRINT_LAYOUT::BOARD_DATA& boardData = m_fileData.boards[0];
+
+    std::unique_ptr<FOOTPRINT> fp = std::make_unique<FOOTPRINT>( nullptr );
+
+    wxString fpName = convertString( boardData.name );
+
+    fp->SetFPID( LIB_ID( wxEmptyString, fpName ) );
+    fp->SetReference( wxT( "REF**" ) );
+    fp->SetValue( fpName );
+    fp->Reference().SetVisible( true );
+    fp->Value().SetVisible( true );
+
+    std::vector<std::vector<VECTOR2I>> outlineSegments;
+    uint8_t                            groundPlane[7] = {};
+
+    for( const auto& obj : boardData.objects )
+    {
+        BOARD_ITEM_CONTAINER* container = fp.get();
+
+        switch( obj.type )
+        {
+        case SPRINT_LAYOUT::OBJ_THT_PAD:
+        case SPRINT_LAYOUT::OBJ_SMD_PAD:
+            processPad( container, obj, groundPlane, nullptr );
+            break;
+
+        case SPRINT_LAYOUT::OBJ_LINE:
+            processLine( container, obj, outlineSegments, groundPlane, nullptr );
+            break;
+
+        case SPRINT_LAYOUT::OBJ_POLY:
+            processPoly( container, obj, outlineSegments, groundPlane, nullptr );
+            break;
+
+        case SPRINT_LAYOUT::OBJ_CIRCLE:
+            processCircle( container, obj, outlineSegments, groundPlane, nullptr );
+            break;
+
+        case SPRINT_LAYOUT::OBJ_TEXT:
+            processText( container, obj );
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    fp->AutoPositionFields();
+
+    // Generate basic courtyard rectangle
+    BOX2I bbox = fp->GetBoundingHull().BBox();
+    bbox.Inflate( pcbIUScale.mmToIU( 0.25 ) ); // Default courtyard clearance
+
+    std::unique_ptr<PCB_SHAPE> shape = std::make_unique<PCB_SHAPE>( fp.get(), SHAPE_T::RECTANGLE );
+    shape->SetWidth( pcbIUScale.mmToIU( DEFAULT_COURTYARD_WIDTH ) );
+    shape->SetLayer( F_CrtYd );
+    shape->SetStart( bbox.GetOrigin() );
+    shape->SetEnd( bbox.GetEnd() );
+
+    fp->Add( shape.release(), ADD_MODE::APPEND );
+
+    return fp.release();
+}
+
+
+void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
+                                       const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet )
+{
+    BOARD*     board = aContainer ? aContainer->GetBoard() : nullptr;
     FOOTPRINT* fp = dynamic_cast<FOOTPRINT*>( aContainer );
+    bool       standaloneFp = false;
 
     if( !fp )
     {
         // Standalone pad without a component gets its own footprint
+        standaloneFp = true;
         fp = new FOOTPRINT( board );
-        fp->SetReference( wxString::Format( wxS( "PAD%d" ),
-                          static_cast<int>( board->Footprints().size() ) ) );
+        fp->SetReference( wxString::Format( wxS( "PAD%d" ), static_cast<int>( board->Footprints().size() ) ) );
         fp->Reference().SetVisible( false );
         fp->SetLayer( F_Cu );
         aContainer->Add( fp );
@@ -736,9 +915,12 @@ void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const S
     // position (depends on the Sprint Layout version that created the file).
     // The points array always stores absolute coordinates, so derive the pad
     // center from the points when available.
-    VECTOR2I pos;
+    // The rotation field for pads (both TH and SMD) is unknown, so detect 
+    // the pad angle from the points when possible.
+    VECTOR2I  ptsCenter;
+    EDA_ANGLE ptsAngle;
 
-    if( aObj.type == SPRINT_LAYOUT::OBJ_SMD_PAD && !aObj.points.empty() )
+    if( !aObj.points.empty() )
     {
         double cx = 0, cy = 0;
 
@@ -750,41 +932,63 @@ void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const S
 
         cx /= static_cast<double>( aObj.points.size() );
         cy /= static_cast<double>( aObj.points.size() );
-        pos = sprintToKicadPos( static_cast<float>( cx ), static_cast<float>( cy ) );
-    }
-    else
-    {
-        pos = sprintToKicadPos( aObj.x, aObj.y );
+        ptsCenter = sprintToKicadPos( static_cast<float>( cx ), static_cast<float>( cy ) );
+
+        std::vector<VECTOR2I> pts;
+
+        for( const SPRINT_LAYOUT::POINT& pt : aObj.points )
+            pts.emplace_back( sprintToKicadPos( pt.x, pt.y ) );
+
+        if( pts.size() == 2 ) // Oval or circle
+        {
+            ptsAngle = EDA_ANGLE( pts[1] - pts[0] );
+
+            if( aObj.type == SPRINT_LAYOUT::OBJ_THT_PAD && aObj.tht_shape == SPRINT_LAYOUT::THT_SHAPE_V_ROUND )
+                ptsAngle -= ANGLE_90;
+        }
+        else if( pts.size() == 4 ) // Rectangular
+        {
+            ptsAngle = EDA_ANGLE( pts[1] - pts[0] );
+        }
+        else if( pts.size() == 8 ) // Octagonal
+        {
+            ptsAngle = EDA_ANGLE( pts[2] - pts[1] );
+        }
+        else
+        {
+            wxFAIL_MSG( wxString::Format( "Unknown pad type %d shape %d with %zu points", int( aObj.type ),
+                                          int( aObj.tht_shape ), aObj.points.size() ) );
+        }
+
+        ptsAngle = ptsAngle.Round( 2 );
     }
 
-    pad->SetPosition( pos );
+    PCB_LAYER_ID padLayer = mapLayer( aObj.layer );
 
     if( aObj.type == SPRINT_LAYOUT::OBJ_THT_PAD )
     {
-        PCB_LAYER_ID padLayer = mapLayer( aObj.layer );
+        int outerDia = sprintToKicadCoord( aObj.outer * 2.0f );
+        int drillDia = sprintToKicadCoord( aObj.inner * 2.0f );
 
         if( aObj.plated == 0 )
         {
-            pad->SetAttribute( PAD_ATTRIB::NPTH );
-            
-            if( padLayer == B_Cu || padLayer == B_SilkS )
-            {
-                pad->SetLayerSet( LSET( { B_Cu, B_Mask } ) );
-                fp->SetLayer( B_Cu );
-            }
-            else
-            {
+            pad->SetAttribute( drillDia > 0 ? PAD_ATTRIB ::NPTH : PAD_ATTRIB::SMD );
+
+            if( padLayer == F_Cu )
                 pad->SetLayerSet( LSET( { F_Cu, F_Mask } ) );
-            }
+            else if( padLayer == B_Cu )
+                pad->SetLayerSet( LSET( { B_Cu, B_Mask } ) );
+            else
+                pad->SetLayerSet( LSET( { padLayer } ) );
+
+            if( standaloneFp && IsBackLayer( padLayer ) )
+                fp->SetLayer( B_Cu );
         }
         else
         {
             pad->SetAttribute( PAD_ATTRIB::PTH );
             pad->SetLayerSet( PAD::PTHMask() );
         }
-
-        int outerDia = sprintToKicadCoord( aObj.outer * 2.0f );
-        int drillDia = sprintToKicadCoord( aObj.inner * 2.0f );
 
         VECTOR2I padSize( outerDia, outerDia );
         VECTOR2I drillSize( drillDia, drillDia );
@@ -851,35 +1055,37 @@ void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const S
             pad->SetLocalZoneConnection( ZONE_CONNECTION::NONE );
         else
             pad->SetLocalZoneConnection( ZONE_CONNECTION::THERMAL );
+
+        VECTOR2I padPos = sprintToKicadPos( aObj.x, aObj.y );
+
+        pad->SetPosition( padPos );
+        pad->Rotate( padPos, -ptsAngle );
     }
     else
     {
         pad->SetAttribute( PAD_ATTRIB::SMD );
 
-        PCB_LAYER_ID padLayer = mapLayer( aObj.layer );
-
-        if( padLayer == B_Cu || padLayer == B_SilkS )
-        {
+        if( padLayer == F_Cu )
+            pad->SetLayerSet( LSET( { F_Cu, F_Paste, F_Mask } ) );
+        else if( padLayer == B_Cu )
             pad->SetLayerSet( LSET( { B_Cu, B_Paste, B_Mask } ) );
-            fp->SetLayer( B_Cu );
-        }
         else
-        {
-            pad->SetLayerSet( PAD::SMDMask() );
-        }
+            pad->SetLayerSet( LSET( { padLayer } ) );
 
-        int width = sprintToKicadCoord( aObj.outer * 2.0f );
-        int height = sprintToKicadCoord( aObj.inner * 2.0f );
+        if( standaloneFp && IsBackLayer( padLayer ) )
+            fp->SetLayer( B_Cu );
+
+        pad->SetShape( PADSTACK::ALL_LAYERS, PAD_SHAPE::RECTANGLE );
+
+        int width = sprintToKicadCoord( aObj.outer );
+        int height = sprintToKicadCoord( aObj.inner );
 
         if( height <= 0 )
             height = width;
 
         pad->SetSize( PADSTACK::ALL_LAYERS, VECTOR2I( width, height ) );
-
-        if( aObj.tht_shape == SPRINT_LAYOUT::THT_SHAPE_CIRCLE )
-            pad->SetShape( PADSTACK::ALL_LAYERS, PAD_SHAPE::CIRCLE );
-        else
-            pad->SetShape( PADSTACK::ALL_LAYERS, PAD_SHAPE::RECTANGLE );
+        pad->SetPosition( ptsCenter );
+        pad->Rotate( ptsCenter, -ptsAngle );
     }
 
     // Solder mask: soldermask==0 means no mask opening (pad is tented/covered)
@@ -903,34 +1109,41 @@ void SPRINT_LAYOUT_PARSER::processPad( BOARD_ITEM_CONTAINER* aContainer, const S
         pad->SetLocalThermalSpokeWidthOverride( std::optional<int>( spokeWidth ) );
     }
 
-    // Set net name
-    if( !aObj.net_name.empty() )
+    // Set net name. Plated THT pads span all copper layers, so accept the GND
+    // default when any configured ground-plane layer is enabled; SMD and NPTH
+    // pads only qualify on their own layer.
+    PCB_LAYER_ID netLayer = padLayer;
+
+    if( aObj.type == SPRINT_LAYOUT::OBJ_THT_PAD && aObj.plated != 0
+        && !layerHasGroundPlane( padLayer, aGroundPlane ) )
     {
-        wxString netName = convertString( aObj.net_name );
-        NETINFO_ITEM* net = board->FindNet( netName );
-
-        if( !net )
-        {
-            net = new NETINFO_ITEM( board, netName );
-            board->Add( net );
-        }
-
-        pad->SetNet( net );
+        if( aGroundPlane[0] )
+            netLayer = F_Cu;
+        else if( aGroundPlane[2] )
+            netLayer = B_Cu;
+        else if( aGroundPlane[4] )
+            netLayer = In1_Cu;
+        else if( aGroundPlane[5] )
+            netLayer = In2_Cu;
     }
 
-    pad->SetNumber( wxString::Format( wxS( "%d" ),
-                                       static_cast<int>( fp->Pads().size() + 1 ) ) );
+    if( NETINFO_ITEM* net = resolveItemNet( board, aObj, netLayer, aGroundPlane, aGndPlaneNet ) )
+        pad->SetNet( net );
+
+    pad->SetNumber( wxString::Format( wxS( "%d" ), static_cast<int>( fp->Pads().size() + 1 ) ) );
 
     fp->Add( pad );
 }
 
 
 void SPRINT_LAYOUT_PARSER::processLine( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments )
+                                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                                        const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet )
 {
     if( aObj.points.size() < 2 )
         return;
 
+    //BOARD* board = aContainer ? aContainer->GetBoard() : nullptr;
     PCB_LAYER_ID layer = mapLayer( aObj.layer );
 
     if( layer == Edge_Cuts )
@@ -957,13 +1170,22 @@ void SPRINT_LAYOUT_PARSER::processLine( BOARD_ITEM_CONTAINER* aContainer, const 
         shape->SetWidth( width );
         shape->SetStart( sprintToKicadPos( aObj.points[i].x, aObj.points[i].y ) );
         shape->SetEnd( sprintToKicadPos( aObj.points[i + 1].x, aObj.points[i + 1].y ) );
+
+        // TODO: Can't detect clearance reliably yet
+        //if( IsCopperLayer( layer ) )
+        //{
+        //    if( NETINFO_ITEM* net = resolveItemNet( board, aObj, layer, aGroundPlane, aGndPlaneNet ) )
+        //        shape->SetNet( net );
+        //}
+
         aContainer->Add( shape );
     }
 }
 
 
 void SPRINT_LAYOUT_PARSER::processPoly( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments )
+                                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                                        const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet )
 {
     if( aObj.points.size() < 2 )
         return;
@@ -973,19 +1195,26 @@ void SPRINT_LAYOUT_PARSER::processPoly( BOARD_ITEM_CONTAINER* aContainer, const 
 
     if( layer == Edge_Cuts )
     {
-        std::vector<VECTOR2I> segment;
+        std::vector<VECTOR2I> points;
 
         for( const auto& pt : aObj.points )
-            segment.push_back( sprintToKicadPos( pt.x, pt.y ) );
+            points.push_back( sprintToKicadPos( pt.x, pt.y ) );
 
-        aOutlineSegments.push_back( std::move( segment ) );
+        points.push_back( points[0] );
+
+        aOutlineSegments.push_back( std::move( points ) );
         return;
     }
 
-    bool isFilled = ( aObj.filled != 0 );
+    //bool isFilled = ( aObj.filled != 0 );
     bool isCutout = ( aObj.keepout != 0 );
 
-    if( isCutout && LSET::AllCuMask().Contains( layer ) && aObj.points.size() >= 3 )
+    int width = sprintToKicadCoord( static_cast<float>( aObj.line_width ) );
+
+    if( width < 0 )
+        width = pcbIUScale.mmToIU( 0.25 );
+
+    if( isCutout && IsCopperLayer( layer ) && aObj.points.size() >= 3 )
     {
         // Cutout area for ground plane exclusion -> rule area (keepout zone)
         ZONE* zone = new ZONE( aContainer );
@@ -1009,49 +1238,14 @@ void SPRINT_LAYOUT_PARSER::processPoly( BOARD_ITEM_CONTAINER* aContainer, const 
         zone->AddPolygon( outline.COutline( 0 ) );
         aContainer->Add( zone );
     }
-    else if( isFilled && LSET::AllCuMask().Contains( layer ) && aObj.points.size() >= 3 )
-    {
-        // Filled polygon on copper -> ZONE
-        ZONE* zone = new ZONE( aContainer );
-        zone->SetLayer( layer );
-        zone->SetIsRuleArea( false );
-        zone->SetDoNotAllowZoneFills( false );
-
-        SHAPE_POLY_SET outline;
-        outline.NewOutline();
-
-        for( const auto& pt : aObj.points )
-        {
-            VECTOR2I pos = sprintToKicadPos( pt.x, pt.y );
-            outline.Append( pos.x, pos.y );
-        }
-
-        zone->AddPolygon( outline.COutline( 0 ) );
-
-        if( !aObj.net_name.empty() )
-        {
-            wxString netName = convertString( aObj.net_name );
-            NETINFO_ITEM* net = board->FindNet( netName );
-
-            if( !net )
-            {
-                net = new NETINFO_ITEM( board, netName );
-                board->Add( net );
-            }
-
-            zone->SetNet( net );
-        }
-
-        aContainer->Add( zone );
-    }
-    else if( isFilled && aObj.points.size() >= 3 )
+    else if( aObj.points.size() >= 3 )
     {
         // Filled polygon on non-copper layer -> filled PCB_SHAPE
         PCB_SHAPE* shape = new PCB_SHAPE( aContainer );
         shape->SetShape( SHAPE_T::POLY );
         shape->SetFilled( true );
         shape->SetLayer( layer );
-        shape->SetWidth( 0 );
+        shape->SetWidth( width );
 
         SHAPE_POLY_SET polySet;
         polySet.NewOutline();
@@ -1063,33 +1257,20 @@ void SPRINT_LAYOUT_PARSER::processPoly( BOARD_ITEM_CONTAINER* aContainer, const 
         }
 
         shape->SetPolyShape( polySet );
+
+        if( NETINFO_ITEM* net = resolveItemNet( board, aObj, layer, aGroundPlane, aGndPlaneNet ) )
+            shape->SetNet( net );
+
         aContainer->Add( shape );
-    }
-    else
-    {
-        // Unfilled polygon -> PCB_SHAPE polyline segments
-        int width = sprintToKicadCoord( static_cast<float>( aObj.line_width ) );
-
-        if( width <= 0 )
-            width = pcbIUScale.mmToIU( 0.25 );
-
-        for( size_t i = 0; i + 1 < aObj.points.size(); i++ )
-        {
-            PCB_SHAPE* shape = new PCB_SHAPE( aContainer );
-            shape->SetShape( SHAPE_T::SEGMENT );
-            shape->SetLayer( layer );
-            shape->SetWidth( width );
-            shape->SetStart( sprintToKicadPos( aObj.points[i].x, aObj.points[i].y ) );
-            shape->SetEnd( sprintToKicadPos( aObj.points[i + 1].x, aObj.points[i + 1].y ) );
-            aContainer->Add( shape );
-        }
     }
 }
 
 
 void SPRINT_LAYOUT_PARSER::processCircle( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                                          std::vector<std::vector<VECTOR2I>>& aOutlineSegments )
+                                          std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
+                                          const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet )
 {
+    //BOARD* board = aContainer ? aContainer->GetBoard() : nullptr;
     PCB_LAYER_ID layer = mapLayer( aObj.layer );
     VECTOR2I center = sprintToKicadPos( aObj.x, aObj.y );
     float radius = ( aObj.outer + aObj.inner ) / 2.0f;
@@ -1181,6 +1362,13 @@ void SPRINT_LAYOUT_PARSER::processCircle( BOARD_ITEM_CONTAINER* aContainer, cons
         shape->SetArcAngleAndEnd( EDA_ANGLE( arcAngle, DEGREES_T ), true );
     }
 
+    // TODO: Can't detect clearance reliably yet
+    //if( IsCopperLayer( layer ) )
+    //{
+    //    if( NETINFO_ITEM* net = resolveItemNet( board, aObj, layer, aGroundPlane, aGndPlaneNet ) )
+    //        shape->SetNet( net );
+    //}
+
     aContainer->Add( shape );
 }
 
@@ -1244,8 +1432,13 @@ void SPRINT_LAYOUT_PARSER::processText( BOARD_ITEM_CONTAINER* aContainer, const 
     text->SetTextThickness( thickness );
     text->SetTextAngle( EDA_ANGLE( -aObj.rotation, DEGREES_T ) );
 
-    if( aObj.mirror != 0 || aObj.thermal_width != 0 )
-        text->SetMirrored( true );
+    bool mirrorH = aObj.thermal_width != 0;
+    bool mirrorV = aObj.mirror != 0;
+
+    text->SetMirrored( mirrorH ^ mirrorV );
+
+    if( mirrorV )
+        text->Rotate( text->GetTextPos(), ANGLE_180 );
 
     if( add )
         aContainer->Add( text );
