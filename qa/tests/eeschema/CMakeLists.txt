@@ -93,6 +93,7 @@ set( QA_EESCHEMA_SRCS
     test_issue24044_expression_net_names.cpp
     test_issue23719_global_label_chain.cpp
     test_issue24107_multiunit_grouping.cpp
+    test_issue24072_symbol_arc_edit_mode.cpp
     test_issue16915_bus_netclass.cpp
     test_nc_pin_connectivity.cpp
     test_crossing_label.cpp
@@ -158,6 +159,7 @@ set( QA_EESCHEMA_SRCS
     test_symbol_clipboard_export.cpp
     test_schematic_clipboard_export.cpp
     test_autoplace_fields.cpp
+    test_field_case_conflicts.cpp
 )
 
 if( WIN32 )

@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 
 #include <layer_ids.h>
 #include <math/vector2d.h>
@@ -44,18 +45,21 @@ class NETINFO_ITEM;
 class PAD;
 class PCB_SHAPE;
 class PCB_TEXT;
+class BOARD_ITEM;
 
 namespace SPRINT_LAYOUT
 {
 
 enum OBJECT_TYPE
 {
-    OBJ_THT_PAD  = 2,
-    OBJ_POLY     = 4,
-    OBJ_CIRCLE   = 5,
-    OBJ_LINE     = 6,
-    OBJ_TEXT     = 7,
-    OBJ_SMD_PAD  = 8,
+    OBJ_SEGMENT      = 1,
+    OBJ_THT_PAD      = 2,
+    OBJ_OUTLINE_TEXT = 3,
+    OBJ_POLY         = 4,
+    OBJ_CIRCLE       = 5,
+    OBJ_LINE         = 6,
+    OBJ_STROKE_TEXT  = 7,
+    OBJ_SMD_PAD      = 8,
 };
 
 enum LAYER_ID
@@ -109,22 +113,22 @@ struct OBJECT
     float                  y = 0;
     float                  outer = 0;          // THT/circle outer radius, SMD half-width, text height
     float                  inner = 0;          // THT drill radius, SMD half-height, text stroke width
-    uint32_t               line_width = 0;     // line/poly stroke width, circle end_angle (deg*1000)
+    int32_t                line_width = 0;     // line/poly stroke width, circle end_angle
     uint8_t                layer = 0;          // LAYER_ID enum value
     uint8_t                tht_shape = 0;      // THT_SHAPE for pads, 1=component-ref for text
     uint16_t               component_id = 0;
-    int32_t                start_angle = 0;    // circle start angle (deg*1000), pad thermal style bytes
+    int32_t                start_angle = 0;    // circle start angle, pad thermal style bytes
     uint8_t                filled = 0;         // nonzero = filled polygon
-    int32_t                clearance = 0;      // ground plane clearance (1/10000 mm)
-    uint8_t                mirror = 0;
-    uint8_t                thermal_width = 0;  // thermal relief spoke width
+    int32_t                clearance = 0;      // ground plane clearance
+    uint8_t                mirror_v = 0;
+    uint8_t                mirror_h = 0;       // or thermal relief spoke enable
     uint8_t                keepout = 0;        // nonzero = ground plane exclusion area
-    int32_t                rotation = 0;       // rotation in degrees * 1000
+    int32_t                rotation = 0;       // rotation in degree units
     uint8_t                plated = 0;         // 0 = NPTH, nonzero = plated
     uint8_t                soldermask = 0;     // 0 = no mask opening (tented)
 
     std::string            text;
-    std::string            net_name;
+    std::string            identifier;
     std::vector<uint32_t>  groups;
     std::vector<POINT>     points;
     std::vector<OBJECT>    text_children;
@@ -182,10 +186,14 @@ private:
     // Binary reading helpers
     uint8_t     readUint8();
     uint16_t    readUint16();
+    int16_t     readInt16();
     uint32_t    readUint32();
+    uint32_t    readUnsigned();
     int32_t     readInt32();
+    int32_t     readSigned();
     float       readFloat();
     double      readDouble();
+    float       readCoord();
     std::string readFixedString( size_t aMaxLen );
     std::string readVarString();
     void        skip( size_t aBytes );
@@ -194,6 +202,8 @@ private:
     void parseFileStart( const wxString& aFileName );
     void parseBoardHeader( SPRINT_LAYOUT::BOARD_DATA& aBoard );
     void parseObjectsList( SPRINT_LAYOUT::BOARD_DATA& aBoard );
+    void parseGroups( SPRINT_LAYOUT::OBJECT& aObj );
+    void parsePoints( SPRINT_LAYOUT::OBJECT& aObj );
     void parseObject( SPRINT_LAYOUT::OBJECT& aObject, bool aIsTextChild = false );
     void parseTrailer();
 
@@ -208,31 +218,42 @@ private:
     NETINFO_ITEM* resolveItemNet( BOARD* aBoard, const SPRINT_LAYOUT::OBJECT& aObj, PCB_LAYER_ID aLayer,
                                   const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet ) const;
 
-    void processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                     const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
+    void processPad( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj, const uint8_t aGroundPlane[7],
+                     NETINFO_ITEM* aGndPlaneNet, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
     void processCircle( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
-                        const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
+                        std::vector<std::vector<VECTOR2I>>& aOutlineSegments, const uint8_t aGroundPlane[7],
+                        NETINFO_ITEM* aGndPlaneNet, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
     void processLine( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
-                      const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
+                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments, const uint8_t aGroundPlane[7],
+                      NETINFO_ITEM* aGndPlaneNet, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
+
+    void processSegment( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
+                         std::vector<std::vector<VECTOR2I>>& aOutlineSegments, const uint8_t aGroundPlane[7],
+                         NETINFO_ITEM* aGndPlaneNet, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
     void processPoly( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
-                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
-                      const uint8_t aGroundPlane[7], NETINFO_ITEM* aGndPlaneNet );
+                      std::vector<std::vector<VECTOR2I>>& aOutlineSegments, const uint8_t aGroundPlane[7],
+                      NETINFO_ITEM* aGndPlaneNet, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
-    void processText( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj );
+    void processText( BOARD_ITEM_CONTAINER* aContainer, const SPRINT_LAYOUT::OBJECT& aObj,
+                      std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
+
+    void processItemGroups( BOARD_ITEM* aItem, const SPRINT_LAYOUT::OBJECT& aObj,
+                            std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
     void buildOutline( BOARD* aBoard, std::vector<std::vector<VECTOR2I>>& aOutlineSegments,
                        const SPRINT_LAYOUT::BOARD_DATA& aBoardData );
+
+    void resolveGroups( BOARD_ITEM_CONTAINER* aContainer, std::map<uint32_t, std::set<BOARD_ITEM*>>& aGidToItems );
 
     SPRINT_LAYOUT::FILE_DATA    m_fileData;
     const uint8_t*              m_pos = nullptr;
     const uint8_t*              m_start = nullptr;
     const uint8_t*              m_end = nullptr;
     std::vector<uint8_t>        m_buffer;
+    bool                        m_parsingMacro = false;
 };
 
 #endif // SPRINT_LAYOUT_PARSER_H_

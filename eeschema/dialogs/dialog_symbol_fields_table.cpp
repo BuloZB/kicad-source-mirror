@@ -53,6 +53,7 @@
 #include <wx/msgdlg.h>
 #include <dialogs/eda_view_switcher.h>
 #include "dialog_symbol_fields_table.h"
+#include "dialog_resolve_field_case_conflicts.h"
 #include <fields_data_model.h>
 #include <eda_list_dialog.h>
 #include <project_sch.h>
@@ -198,6 +199,20 @@ DIALOG_SYMBOL_FIELDS_TABLE::DIALOG_SYMBOL_FIELDS_TABLE( SCH_EDIT_FRAME* parent, 
 {
     // Get all symbols from the list of schematic sheets
     m_parent->Schematic().Hierarchy().GetSymbols( m_symbolsList, SYMBOL_FILTER_NON_POWER );
+
+    if( auto conflicts = DetectFieldCaseConflicts( m_symbolsList ); !conflicts.empty() )
+    {
+        DIALOG_RESOLVE_FIELD_CASE_CONFLICTS resolver( this, m_parent, std::move( conflicts ) );
+
+        if( resolver.ShowModal() != wxID_OK )
+        {
+            m_aborted = true;
+            return;
+        }
+
+        m_symbolsList.Clear();
+        m_parent->Schematic().Hierarchy().GetSymbols( m_symbolsList, SYMBOL_FILTER_NON_POWER );
+    }
 
     m_bRefresh->SetBitmap( KiBitmapBundle( BITMAPS::small_refresh ) );
     m_bMenu->SetBitmap( KiBitmapBundle( BITMAPS::config ) );
@@ -736,7 +751,12 @@ void DIALOG_SYMBOL_FIELDS_TABLE::LoadFieldNames()
     AddField( FIELDS_EDITOR_GRID_DATA_MODEL::ITEM_NUMBER_VARIABLE, _( "#" ), true, false );
 
     // User fields next
-    std::set<wxString> userFieldNames;
+    auto caseInsensitiveLess = []( const wxString& a, const wxString& b )
+    {
+        return a.CmpNoCase( b ) < 0;
+    };
+
+    std::map<wxString, std::map<wxString, int>, decltype( caseInsensitiveLess )> userFieldGroups( caseInsensitiveLess );
 
     for( int ii = 0; ii < (int) m_symbolsList.GetCount(); ++ii )
     {
@@ -745,17 +765,39 @@ void DIALOG_SYMBOL_FIELDS_TABLE::LoadFieldNames()
         for( const SCH_FIELD& field : symbol->GetFields() )
         {
             if( !field.IsMandatory() && !field.IsPrivate() )
-                userFieldNames.insert( field.GetName() );
+                userFieldGroups[field.GetName()][field.GetName()]++;
         }
     }
 
-    for( const wxString& fieldName : userFieldNames )
-        AddField( fieldName, GetGeneratedFieldDisplayName( fieldName ), true, false );
+    for( const auto& [groupKey, exactCounts] : userFieldGroups )
+    {
+        wxString canonicalName;
 
-    // Add any templateFieldNames which aren't already present in the userFieldNames
+        if( const TEMPLATE_FIELDNAME* tfn = m_schSettings.m_TemplateFieldNames.GetFieldName( groupKey ) )
+        {
+            canonicalName = tfn->m_Name;
+        }
+        else
+        {
+            int bestCount = -1;
+
+            for( const auto& [name, count] : exactCounts )
+            {
+                if( count > bestCount )
+                {
+                    bestCount = count;
+                    canonicalName = name;
+                }
+            }
+        }
+
+        AddField( canonicalName, GetGeneratedFieldDisplayName( canonicalName ), true, false );
+    }
+
+    // Add any templateFieldNames which aren't already present.
     for( const TEMPLATE_FIELDNAME& tfn : m_schSettings.m_TemplateFieldNames.GetTemplateFieldNames() )
     {
-        if( userFieldNames.count( tfn.m_Name ) == 0 )
+        if( userFieldGroups.count( tfn.m_Name ) == 0 )
             AddField( tfn.m_Name, GetGeneratedFieldDisplayName( tfn.m_Name ), false, false );
     }
 }

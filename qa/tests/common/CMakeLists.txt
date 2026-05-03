@@ -34,6 +34,7 @@ set( QA_COMMON_SRCS
 
     test_array_axis.cpp
     test_atomic_save.cpp
+    test_backup_settings.cpp
     test_base_set.cpp
     test_bitmap_base.cpp
     test_clipboard.cpp
@@ -57,6 +58,7 @@ set( QA_COMMON_SRCS
     test_markup_parser.cpp
     test_kicad_string.cpp
     test_kicad_stroke_font.cpp
+    test_gerber_plotter.cpp
     test_pdf_unicode_plot.cpp
     test_png_plotter.cpp
     test_kiid.cpp
@@ -115,6 +117,7 @@ set( QA_COMMON_SRCS
     io/pads/test_pads_common.cpp
     io/pads/test_pads_unit_converter.cpp
 
+    test_kigit_common.cpp
     test_kigit_orphan_registry.cpp
     test_throttle.cpp
     view/test_zoom_controller.cpp
@@ -142,6 +145,7 @@ set( QA_COMMON_SRCS
     test_secure_token_store.cpp
 
     # Job tests
+    test_job_export_pcb_variants.cpp
     test_job_export_sch_plot.cpp
     test_job_sch_erc.cpp
     test_jobs_runner.cpp
