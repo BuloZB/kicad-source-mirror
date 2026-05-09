@@ -620,18 +620,31 @@ double ZONE::ViewGetLOD( int aLayer, const KIGFX::VIEW* aView ) const
     if( !aView )
         return LOD_SHOW;
 
-    if( !aView->IsLayerVisible( LAYER_ZONES ) )
+    if( !aView->IsLayerVisibleCached( LAYER_ZONES ) )
         return LOD_HIDE;
 
     if( FOOTPRINT* parentFP = GetParentFootprint() )
     {
-        bool flipped = parentFP->GetLayer() == B_Cu;
+        const LSET zl = GetLayerSet();
+        bool       onFront = ( zl & LSET::FrontMask() ).any();
+        bool       onBack = ( zl & LSET::BackMask() ).any();
 
-        // Handle Render tab switches
-        if( !flipped && !aView->IsLayerVisible( LAYER_FOOTPRINTS_FR ) )
+        if( !onFront && !onBack )
+        {
+            onFront = parentFP->GetLayer() == F_Cu;
+            onBack = parentFP->GetLayer() == B_Cu;
+        }
+
+        const bool frHidden = !aView->IsLayerVisibleCached( LAYER_FOOTPRINTS_FR );
+        const bool bkHidden = !aView->IsLayerVisibleCached( LAYER_FOOTPRINTS_BK );
+
+        if( onFront && !onBack && frHidden )
             return LOD_HIDE;
 
-        if( flipped && !aView->IsLayerVisible( LAYER_FOOTPRINTS_BK ) )
+        if( onBack && !onFront && bkHidden )
+            return LOD_HIDE;
+
+        if( onFront && onBack && frHidden && bkHidden )
             return LOD_HIDE;
     }
 

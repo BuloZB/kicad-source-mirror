@@ -65,6 +65,8 @@ DIALOG_FP_EDIT_PAD_TABLE::DIALOG_FP_EDIT_PAD_TABLE( PCB_BASE_FRAME* aParent, FOO
         m_unitsProvider( std::make_unique<UNITS_PROVIDER>( pcbIUScale, GetUserUnits() ) ),
         m_summaryDirty( true )
 {
+    CaptureOriginalPadState();
+
     wxBoxSizer* topSizer = new wxBoxSizer( wxVERTICAL );
 
     wxBoxSizer* bSummarySizer;
@@ -111,7 +113,7 @@ DIALOG_FP_EDIT_PAD_TABLE::DIALOG_FP_EDIT_PAD_TABLE( PCB_BASE_FRAME* aParent, FOO
     topSizer->Add( bSummarySizer, 0, wxEXPAND|wxTOP|wxBOTTOM, 5 );
 
     m_grid = new WX_GRID( this, wxID_ANY );
-    m_grid->CreateGrid( m_footprint->GetPadCount(), 11 );
+    m_grid->CreateGrid( m_originalPads.size(), 11 );
     m_grid->SetColLabelValue( COL_NUMBER, _( "Number" ) );
     m_grid->SetColLabelValue( COL_TYPE,   _( "Type" ) );
     m_grid->SetColLabelValue( COL_SHAPE,  _( "Shape" ) );
@@ -179,14 +181,10 @@ DIALOG_FP_EDIT_PAD_TABLE::DIALOG_FP_EDIT_PAD_TABLE( PCB_BASE_FRAME* aParent, FOO
     m_grid->SetColAttr( COL_DRILL_Y, attr );
 
     // Pad->Die Length
-    attr = new wxGridCellAttr;
-    attr->SetEditor( new GRID_CELL_TEXT_EDITOR() );
-    m_grid->SetColAttr( COL_P2D_LENGTH, attr );
+    m_grid->SetAutoEvalColUnits( COL_P2D_LENGTH, m_unitsProvider->GetUnitsFromType( EDA_DATA_TYPE::DISTANCE ) );
 
     // Pad->Die Delay
-    attr = new wxGridCellAttr;
-    attr->SetEditor( new GRID_CELL_TEXT_EDITOR() );
-    m_grid->SetColAttr( COL_P2D_DELAY, attr );
+    m_grid->SetAutoEvalColUnits( COL_P2D_DELAY, m_unitsProvider->GetUnitsFromType( EDA_DATA_TYPE::TIME ) );
 
     m_grid->SetUnitsProvider( m_unitsProvider.get(), COL_POS_X );
     m_grid->SetUnitsProvider( m_unitsProvider.get(), COL_POS_Y );
@@ -194,7 +192,8 @@ DIALOG_FP_EDIT_PAD_TABLE::DIALOG_FP_EDIT_PAD_TABLE( PCB_BASE_FRAME* aParent, FOO
     m_grid->SetUnitsProvider( m_unitsProvider.get(), COL_SIZE_Y );
     m_grid->SetUnitsProvider( m_unitsProvider.get(), COL_DRILL_X );
     m_grid->SetUnitsProvider( m_unitsProvider.get(), COL_DRILL_Y );
-    m_grid->SetAutoEvalCols( { COL_POS_X, COL_POS_Y, COL_SIZE_X, COL_SIZE_Y, COL_DRILL_X, COL_DRILL_Y } );
+    m_grid->SetAutoEvalCols(
+            { COL_POS_X, COL_POS_Y, COL_SIZE_X, COL_SIZE_Y, COL_DRILL_X, COL_DRILL_Y, COL_P2D_LENGTH, COL_P2D_DELAY } );
 
     // add Cut, Copy, and Paste to wxGrid
     m_grid->PushEventHandler( new GRID_TRICKS( m_grid ) );
@@ -209,8 +208,6 @@ DIALOG_FP_EDIT_PAD_TABLE::DIALOG_FP_EDIT_PAD_TABLE( PCB_BASE_FRAME* aParent, FOO
 
     SetSizer( topSizer );
     SetupStandardButtons();
-
-    CaptureOriginalPadState();
 
     // Bind cell change handlers for real-time updates
     m_grid->Bind( wxEVT_GRID_CELL_CHANGED, &DIALOG_FP_EDIT_PAD_TABLE::OnCellChanged, this );
@@ -278,7 +275,7 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataToWindow()
 
     int row = 0;
 
-    for( PAD* pad : m_footprint->Pads() )
+    for( const auto pad : m_originalPads | std::views::keys )
     {
         if( row >= m_grid->GetNumberRows() )
             continue;
@@ -346,11 +343,12 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataToWindow()
 
         // Pad to die metrics
         if( pad->GetPadToDieLength() )
-            m_grid->SetCellValue( row, COL_P2D_LENGTH, m_unitsProvider->StringFromValue( pad->GetPadToDieLength(),
-                                                                                         true ) );
+            m_grid->SetUnitValue( row, COL_P2D_LENGTH, pad->GetPadToDieLength() );
 
         if( pad->GetPadToDieDelay() )
-            m_grid->SetCellValue( row, COL_P2D_DELAY, wxString::Format( "%d", pad->GetPadToDieDelay() ) );
+            m_grid->SetUnitValue( row, COL_P2D_DELAY, pad->GetPadToDieDelay() );
+
+        setRowNullableEditors( row );
 
         row++;
     }
@@ -416,6 +414,22 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataToWindow()
 }
 
 
+void DIALOG_FP_EDIT_PAD_TABLE::setRowNullableEditors( int aRowId ) const
+{
+    // Set nullable editors
+    auto setCellEditor = [this, aRowId]( int aCol )
+    {
+        GRID_CELL_MARK_AS_NULLABLE* cellEditor = new GRID_CELL_MARK_AS_NULLABLE( true );
+        wxGridCellAttr*             attr = m_grid->GetOrCreateCellAttr( aRowId, aCol );
+        attr->SetEditor( cellEditor );
+        attr->DecRef();
+    };
+
+    setCellEditor( COL_P2D_LENGTH );
+    setCellEditor( COL_P2D_DELAY );
+}
+
+
 void DIALOG_FP_EDIT_PAD_TABLE::CaptureOriginalPadState()
 {
     m_originalPads.clear();
@@ -432,7 +446,8 @@ void DIALOG_FP_EDIT_PAD_TABLE::CaptureOriginalPadState()
         snap.attribute     = pad->GetAttribute();
         snap.padToDieLength= pad->GetPadToDieLength();
         snap.padToDieDelay = pad->GetPadToDieDelay();
-        m_originalPads.push_back( snap );
+
+        m_originalPads.try_emplace( pad, std::move( snap ) );
     }
 }
 
@@ -442,16 +457,15 @@ void DIALOG_FP_EDIT_PAD_TABLE::RestoreOriginalPadState()
     if( !m_footprint )
         return;
 
-    size_t idx = 0;
-    PCB_BASE_FRAME* base = dynamic_cast<PCB_BASE_FRAME*>( GetParent() );
+    const PCB_BASE_FRAME* base = dynamic_cast<PCB_BASE_FRAME*>( GetParent() );
     PCB_DRAW_PANEL_GAL* canvas = base ? base->GetCanvas() : nullptr;
 
     for( PAD* pad : m_footprint->Pads() )
     {
-        if( idx >= m_originalPads.size() )
-            break;
+        if( !m_originalPads.contains( pad ) )
+            continue;
 
-        const PAD_SNAPSHOT& snap = m_originalPads[idx++];
+        const PAD_SNAPSHOT& snap = m_originalPads.at( pad );
         pad->SetNumber( snap.number );
         pad->SetPosition( snap.position );
         pad->SetPadstack( snap.padstack );
@@ -487,7 +501,7 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataFromWindow()
 
     int row = 0;
 
-    for( PAD* pad : m_footprint->Pads() )
+    for( PAD* pad : m_originalPads | std::views::keys )
     {
         commit.Modify( pad );
         pad->SetNumber( m_grid->GetCellValue( row, COL_NUMBER ) );
@@ -569,8 +583,8 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataFromWindow()
         }
 
         // Pad->Die
-        wxString delayStr = m_grid->GetCellValue( row, COL_P2D_DELAY );
-        wxString lenStr = m_grid->GetCellValue( row, COL_P2D_LENGTH );
+        const wxString delayStr = m_grid->GetCellValue( row, COL_P2D_DELAY );
+        const wxString lenStr = m_grid->GetCellValue( row, COL_P2D_LENGTH );
 
         if( !lenStr.IsEmpty() )
             pad->SetPadToDieLength( m_grid->GetUnitValue( row, COL_P2D_LENGTH ) );
@@ -578,14 +592,7 @@ bool DIALOG_FP_EDIT_PAD_TABLE::TransferDataFromWindow()
             pad->SetPadToDieLength( 0 );
 
         if( !delayStr.IsEmpty() )
-        {
-            long delayVal;
-
-            if( delayStr.ToLong( &delayVal ) )
-                pad->SetPadToDieDelay( (int) delayVal );
-            else
-                pad->SetPadToDieDelay( 0 );
-        }
+            pad->SetPadToDieDelay( m_grid->GetUnitValue( row, COL_P2D_DELAY ) );
         else
             pad->SetPadToDieDelay( 0 );
 
@@ -688,20 +695,7 @@ void DIALOG_FP_EDIT_PAD_TABLE::OnCellChanged( wxGridEvent& aEvent )
     if( !m_footprint )
         return;
 
-    // row -> pad mapping is current order of Pads() iteration; rebuild each time (pads count small)
-    int idx = 0;
-    PAD* target = nullptr;
-
-    for( PAD* pad : m_footprint->Pads() )
-    {
-        if( idx == row )
-        {
-            target = pad;
-            break;
-        }
-
-        ++idx;
-    }
+    PAD* target = getPadForRow( row );
 
     if( !target )
         return;
@@ -810,15 +804,10 @@ void DIALOG_FP_EDIT_PAD_TABLE::OnCellChanged( wxGridEvent& aEvent )
         break;
 
     case COL_P2D_DELAY:
-    {
-        wxString d = m_grid->GetCellValue( row, col );
-        long val;
-
-        if( d.ToLong( &val ) )
-            target->SetPadToDieDelay( (int) val );
+        if( !m_grid->GetCellValue( row, col ).IsEmpty() )
+            target->SetPadToDieDelay( m_grid->GetUnitValue( row, col ) );
 
         break;
-    }
 
     default:
         break;
@@ -857,24 +846,17 @@ void DIALOG_FP_EDIT_PAD_TABLE::OnSelectCell( wxGridEvent& aEvent )
         }
     }
 
-    int idx = 0;
+    PAD* pad = getPadForRow( row );
 
-    for( PAD* pad : m_footprint->Pads() )
+    if( !pad )
+        return;
+
+    pad->SetBrightened();
+
+    if( canvas )
     {
-        if( idx == row )
-        {
-            pad->SetBrightened();
-
-            if( canvas )
-            {
-                canvas->GetView()->Update( pad, KIGFX::REPAINT );
-                canvas->ForceRefresh();
-            }
-
-            break;
-        }
-
-        ++idx;
+        canvas->GetView()->Update( pad, KIGFX::REPAINT );
+        canvas->ForceRefresh();
     }
 }
 
@@ -887,22 +869,19 @@ void DIALOG_FP_EDIT_PAD_TABLE::OnUpdateUI( wxUpdateUIEvent& aEvent )
         {
             int  row = m_grid->GetGridCursorRow();
             int  col = m_grid->GetGridCursorCol();
-            int  idx = 0;
-            PAD* target = nullptr;
 
-            for( PAD* pad : m_footprint->Pads() )
+            PAD* target = getPadForRow( row );
+
+            if( !target )
+                return;
+
+            wxGridCellEditor* editor = m_grid->GetCellEditor( row, col );
+
+            if( editor )
             {
-                if( idx == row )
-                {
-                    target = pad;
-                    break;
-                }
-
-                ++idx;
+                target->SetNumber( editor->GetValue() );
+                editor->DecRef();
             }
-
-            if( target )
-                target->SetNumber( m_grid->GetCellEditor( row, col )->GetValue() );
         }
 
         updateSummary();
@@ -931,4 +910,14 @@ void DIALOG_FP_EDIT_PAD_TABLE::updateSummary()
     m_duplicate_pins->SetToolTip( duplicates );
 
     Layout();
+}
+
+
+PAD* DIALOG_FP_EDIT_PAD_TABLE::getPadForRow( const int aRowId ) const
+{
+    if( static_cast<size_t>( aRowId ) >= m_originalPads.size() )
+        return nullptr;
+
+    const auto targetItr = std::next( m_originalPads.begin(), aRowId );
+    return targetItr->first;
 }
