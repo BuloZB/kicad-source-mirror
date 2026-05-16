@@ -233,6 +233,7 @@ set( KICOMMON_SRCS
     widgets/ui_common.cpp
     widgets/up_down_tree.cpp
     widgets/wx_grid.cpp
+    widgets/wx_data_view_hyperlink_renderer.cpp
     widgets/wx_html_report_panel.cpp
     widgets/wx_html_report_panel_base.cpp
     widgets/wx_html_report_box.cpp
@@ -480,7 +481,8 @@ set( COMMON_ABOUT_DLG_SRCS
 set( COMMON_GIT_DLG_SRCS
     dialogs/git/dialog_git_commit.cpp
     dialogs/git/dialog_git_switch.cpp
-    dialogs/git/dialog_git_auth.cpp
+    dialogs/git/dialog_git_credentials.cpp
+    dialogs/git/dialog_git_credentials_base.cpp
     dialogs/git/dialog_git_repository.cpp
     dialogs/git/dialog_git_repository_base.cpp
     dialogs/git/panel_git_repos.cpp

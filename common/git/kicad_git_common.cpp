@@ -840,7 +840,11 @@ void KIGIT_COMMON::updateConnectionType()
 int KIGIT_COMMON::HandleSSHKeyAuthentication( git_cred** aOut, const wxString& aUsername )
 {
     if( !( m_testedTypes & KIGIT_CREDENTIAL_SSH_AGENT ) )
-        return HandleSSHAgentAuthentication( aOut, aUsername );
+    {
+        if( HandleSSHAgentAuthentication( aOut, aUsername ) == GIT_OK )
+            return GIT_OK;
+        // Agent unavailable or has no matching key; fall through to configured key.
+    }
 
     // SSH key authentication with password
     wxString sshKey = GetNextPublicKey();
@@ -882,6 +886,8 @@ int KIGIT_COMMON::HandlePlaintextAuthentication( git_cred** aOut, const wxString
 
 int KIGIT_COMMON::HandleSSHAgentAuthentication( git_cred** aOut, const wxString& aUsername )
 {
+    m_testedTypes |= KIGIT_CREDENTIAL_SSH_AGENT;
+
     if( git_credential_ssh_key_from_agent( aOut, aUsername.mbc_str() ) != GIT_OK )
     {
         wxLogTrace( traceGit, "Failed to create SSH agent credential for %s: %s",
@@ -889,7 +895,6 @@ int KIGIT_COMMON::HandleSSHAgentAuthentication( git_cred** aOut, const wxString&
         return GIT_PASSTHROUGH;
     }
 
-    m_testedTypes |= KIGIT_CREDENTIAL_SSH_AGENT;
     return GIT_OK;
 }
 
@@ -1067,7 +1072,19 @@ extern "C" int credentials_cb( git_cred** aOut, const char* aUrl, const char* aU
                 && !( parent->TestedTypes() & GIT_CREDENTIAL_SSH_KEY ) )
     {
         // SSH key authentication
-        return common->HandleSSHKeyAuthentication( aOut, parent->GetUsername() );
+        int result = common->HandleSSHKeyAuthentication( aOut, parent->GetUsername() );
+
+        // Translate exhausted-keys PASSTHROUGH into a proper auth error so the
+        // retry loop runs and libgit2 doesn't emit "no callback set".
+        if( result == GIT_PASSTHROUGH )
+        {
+            git_error_clear();
+            git_error_set_str( GIT_ERROR_NET, _( "Unable to authenticate" ).mbc_str() );
+            common->SetAuthFailure();
+            return GIT_EAUTH;
+        }
+
+        return result;
     }
     else
     {
@@ -1080,6 +1097,7 @@ extern "C" int credentials_cb( git_cred** aOut, const char* aUrl, const char* aU
         git_error_set_str( GIT_ERROR_NET, _( "Unable to authenticate" ).mbc_str() );
 
         // Otherwise, we did try something but we failed, so return an authentication error
+        common->SetAuthFailure();
         return GIT_EAUTH;
     }
 
