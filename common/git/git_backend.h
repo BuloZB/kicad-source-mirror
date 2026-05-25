@@ -87,7 +87,11 @@ public:
                                  const wxString& aAuthorName,
                                  const wxString& aAuthorEmail ) = 0;
 
-    virtual PushResult Push( GIT_PUSH_HANDLER* aHandler ) = 0;
+    virtual CommitResult Amend( GIT_COMMIT_HANDLER* aHandler, const std::vector<wxString>& aFiles,
+                                const wxString& aMessage, const wxString& aAuthorName,
+                                const wxString& aAuthorEmail ) = 0;
+
+    virtual PushResult Push( GIT_PUSH_HANDLER* aHandler, bool aForce = false ) = 0;
 
     virtual bool HasChangedFiles( GIT_STATUS_HANDLER* aHandler ) = 0;
 
@@ -116,6 +120,8 @@ public:
 
     virtual bool PerformFetch( GIT_PULL_HANDLER* aHandler, bool aSkipLock ) = 0;
     virtual PullResult PerformPull( GIT_PULL_HANDLER* aHandler ) = 0;
+    virtual bool       ResetToUpstream( GIT_PULL_HANDLER* aHandler ) = 0;
+    virtual PullResult RebaseOntoUpstream( GIT_PULL_HANDLER* aHandler ) = 0;
 
     virtual void PerformRevert( GIT_REVERT_HANDLER* aHandler ) = 0;
 

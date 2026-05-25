@@ -58,6 +58,7 @@ set( QA_COMMON_SRCS
     test_markup_parser.cpp
     test_kicad_string.cpp
     test_kicad_stroke_font.cpp
+    test_dxf_plotter.cpp
     test_gerber_plotter.cpp
     test_pdf_unicode_plot.cpp
     test_png_plotter.cpp
@@ -78,6 +79,7 @@ set( QA_COMMON_SRCS
     test_string_utils.cpp
     test_richio.cpp
     test_text_attributes.cpp
+    git/test_libgit_backend.cpp
     text_eval/test_text_eval_parser.cpp
     text_eval/test_text_eval_parser_core.cpp
     text_eval/test_text_eval_parser_datetime.cpp
@@ -151,6 +153,7 @@ set( QA_COMMON_SRCS
     test_job_export_sch_plot.cpp
     test_job_sch_erc.cpp
     test_jobs_runner.cpp
+    test_jobs_output_archive.cpp
 )
 
 if( KICAD_TEST_DATABASE_LIBRARIES )

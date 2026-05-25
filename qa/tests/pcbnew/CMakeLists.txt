@@ -70,6 +70,8 @@ set( QA_PCBNEW_SRCS
     test_pad_size_setters.cpp
     test_pad_swap_positions.cpp
     test_pad_tenting.cpp
+    test_plot_edge_cuts_drill_marks.cpp
+    test_plot_pad_mask.cpp
     test_pcb_textbox.cpp
     test_prettifier.cpp
     test_pcb_render_settings.cpp
@@ -101,6 +103,7 @@ set( QA_PCBNEW_SRCS
     net_chains/test_net_chain_total_length.cpp
     net_chains/test_net_chain_total_length_sexpr.cpp
     net_chains/test_net_chain_bridging_delay.cpp
+    net_chains/test_net_chain_partition.cpp
     net_chains/test_tuning_bridging_clamp.cpp
 
     drc/test_custom_rule_severities.cpp
@@ -146,6 +149,12 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_creepage_issue23576.cpp
     drc/test_drc_creepage_issue23658.cpp
     drc/test_drc_invalid_outline_issue24078.cpp
+    drc/test_drc_invalid_outline_issue24241.cpp
+    drc/test_drc_annular_overlap_issue24340.cpp
+    drc/test_drc_hole_clearance_issue24355.cpp
+    drc/test_drc_issue24264.cpp
+    drc/test_drc_issue23868.cpp
+    drc/test_drc_issue24211.cpp
     drc/test_drc_physical_clearance.cpp
     drc/test_drc_rule_editor.cpp
     drc/test_drc_bitmap_overlay_panel.cpp

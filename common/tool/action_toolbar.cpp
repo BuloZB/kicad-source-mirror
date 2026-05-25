@@ -291,13 +291,8 @@ void ACTION_TOOLBAR::ApplyConfiguration( const TOOLBAR_CONFIGURATION& aConfig )
 {
     wxASSERT( GetParent() );
 
-    std::map<std::string, std::string> currentGroupItems;
-
-    for( const auto& [id, group] : m_actionGroups )
-    {
-        if( m_toolActions[group->GetUIId()] )
-            currentGroupItems[group->GetName()] = m_toolActions[group->GetUIId()]->GetName();
-    }
+    // Keep each group's selection across the rebuild.
+    std::map<std::string, std::string> currentGroupItems = m_groupSelections;
 
     // Remove existing tools
     ClearToolbar();
@@ -350,6 +345,10 @@ void ACTION_TOOLBAR::ApplyConfiguration( const TOOLBAR_CONFIGURATION& aConfig )
                         defaultTool = grpAction;
                 }
             }
+
+            // A group needs at least one action
+            if( tools.empty() )
+                continue;
 
             std::unique_ptr<ACTION_GROUP> group = std::make_unique<ACTION_GROUP>( groupName, tools );
 
@@ -610,6 +609,7 @@ void ACTION_TOOLBAR::doSelectAction( ACTION_GROUP* aGroup, const TOOL_ACTION& aA
 
     // Update the currently selected action
     m_toolActions[ groupId ] = &aAction;
+    m_groupSelections[aGroup->GetName()] = aAction.GetName();
 
     Refresh();
 }

@@ -91,6 +91,42 @@ wxString KIGIT_COMMON::GetProjectDir() const
 }
 
 
+wxString KIGIT_COMMON::GetUpstreamShorthand() const
+{
+    wxCHECK( m_repo, wxEmptyString );
+
+    git_reference* head = nullptr;
+
+    if( git_repository_head( &head, m_repo ) != GIT_OK )
+        return wxEmptyString;
+
+    KIGIT::GitReferencePtr headPtr( head );
+
+    if( !git_reference_is_branch( head ) )
+        return wxEmptyString;
+
+    git_reference* upstream = nullptr;
+
+    if( git_branch_upstream( &upstream, head ) == GIT_OK )
+    {
+        KIGIT::GitReferencePtr upstreamPtr( upstream );
+        const char*            shorthand = git_reference_shorthand( upstream );
+
+        if( shorthand )
+            return wxString::FromUTF8( shorthand );
+    }
+
+    // No upstream configured.  Synthesise the target that PerformPull's fallback
+    // and the first push will use.
+    const char* branch_shorthand = git_reference_shorthand( head );
+
+    if( !branch_shorthand )
+        return wxEmptyString;
+
+    return wxString::Format( "%s/%s", GetRemoteNameOrDefault(), branch_shorthand );
+}
+
+
 wxString KIGIT_COMMON::GetCurrentBranchName() const
 {
     wxCHECK( m_repo, wxEmptyString );
@@ -399,6 +435,22 @@ std::pair<std::set<wxString>, std::set<wxString>> KIGIT_COMMON::GetDifferentFile
 
     collect_paths( base_tree, head_tree, modified_files.first );    // AHEAD
     collect_paths( base_tree, remote_tree, modified_files.second ); // BEHIND
+
+    // Filter both sets to files whose content actually differs between HEAD and remote.
+    // Without this, a file touched by a commit that has since been replaced with an
+    // identical-tree commit (e.g. a message-only amend) keeps an AHEAD marker even
+    // though its blob matches the remote's blob.
+    std::set<wxString> actuallyDifferent;
+    collect_paths( head_tree, remote_tree, actuallyDifferent );
+
+    auto filterToDifferent = [&]( std::set<wxString>& aSet )
+    {
+        for( auto it = aSet.begin(); it != aSet.end(); )
+            it = actuallyDifferent.count( *it ) ? std::next( it ) : aSet.erase( it );
+    };
+
+    filterToDifferent( modified_files.first );
+    filterToDifferent( modified_files.second );
 
     return modified_files;
 }
@@ -1060,7 +1112,8 @@ extern "C" int credentials_cb( git_cred** aOut, const char* aUrl, const char* aU
     }
     else if( parent->GetConnType() == KIGIT_COMMON::GIT_CONN_TYPE::GIT_CONN_HTTPS
                 && ( aAllowedTypes & GIT_CREDENTIAL_USERPASS_PLAINTEXT )
-                && !( parent->TestedTypes() & GIT_CREDENTIAL_USERPASS_PLAINTEXT ) )
+                && !( parent->TestedTypes() & GIT_CREDENTIAL_USERPASS_PLAINTEXT )
+                && !parent->GetUsername().IsEmpty() )
     {
         // Plaintext authentication
         wxLogTrace( traceGit, "Plaintext authentication for %s at %s with allowed type %d",
