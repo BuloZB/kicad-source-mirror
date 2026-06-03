@@ -370,6 +370,8 @@ bool DIALOG_SHIM::Show( bool show )
 
     if( show )
     {
+        KIPLATFORM::UI::StabilizeWindowPosition( this );
+
 #ifndef __WINDOWS__
         wxDialog::Raise();  // Needed on OS X and some other window managers (i.e. Unity)
 #endif
@@ -713,10 +715,17 @@ void DIALOG_SHIM::LoadControlState()
                     {
                         const nlohmann::json& j = it->second;
 
-                        if( m_unitBinders.contains( win ) && !m_unitBinders[ win ]->UnitsInvariant() )
+                        if( m_unitBinders.contains( win ) )
                         {
                             if( j.is_number_integer() )
+                            {
                                 m_unitBinders[ win ]->ChangeValue( j.get<int>() );
+                            }
+                            else if( j.is_string() )
+                            {
+                                if( wxTextEntry* textEntry = dynamic_cast<wxTextEntry*>( win ) )
+                                    textEntry->ChangeValue( wxString::FromUTF8( j.get<std::string>().c_str() ) );
+                            }
                         }
                         else if( wxComboBox* combo = dynamic_cast<wxComboBox*>( win ) )
                         {
@@ -1352,6 +1361,8 @@ void DIALOG_SHIM::ClearModify()
 
 int DIALOG_SHIM::ShowModal()
 {
+    KIPLATFORM::UI::StabilizeWindowPosition( this );
+
     // Apple in its infinite wisdom will raise a disabled window before even passing
     // us the event, so we have no way to stop it.  Instead, we must set an order on
     // the windows so that the modal will be pushed in front of the disabled

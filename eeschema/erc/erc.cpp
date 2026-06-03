@@ -1032,6 +1032,7 @@ int ERC_TESTER::TestPinToPin()
         bool                hasDriver = false;
         std::vector<ERC_SCH_PIN_CONTEXT*> pinsNeedingDrivers;
         std::vector<ERC_SCH_PIN_CONTEXT*> nonPowerPinsNeedingDrivers;
+        std::vector<ERC_SCH_PIN_CONTEXT*> powerInPinsNeedingDrivers;
 
         // We need different drivers for power nets and normal nets.
         // A power net has at least one pin having the ELECTRICAL_PINTYPE::PT_POWER_IN
@@ -1064,6 +1065,9 @@ int ERC_TESTER::TestPinToPin()
 
                 if( !refPin.Pin()->IsPower() )
                     nonPowerPinsNeedingDrivers.push_back( &refPin );
+
+                if( refType == ELECTRICAL_PINTYPE::PT_POWER_IN )
+                    powerInPinsNeedingDrivers.push_back( &refPin );
 
                 if( !needsDriver.Pin()
                     || ( !needsDriver.Pin()->IsVisible() && refPin.Pin()->IsVisible() )
@@ -1280,17 +1284,24 @@ int ERC_TESTER::TestPinToPin()
             {
                 std::vector<ERC_SCH_PIN_CONTEXT*> pinsToMark;
 
+                // The marker should land on a pin matching the error message: for an
+                // ERCE_POWERPIN_NOT_DRIVEN error mark a PT_POWER_IN pin (which is what the
+                // error refers to), for ERCE_PIN_NOT_DRIVEN prefer a pin that is not on a
+                // power symbol so the marker is anchored to the consuming pin rather than
+                // a power flag.
                 if( m_showAllErrors )
                 {
-                    if( !nonPowerPinsNeedingDrivers.empty() )
+                    if( ispowerNet && !powerInPinsNeedingDrivers.empty() )
+                        pinsToMark = powerInPinsNeedingDrivers;
+                    else if( !nonPowerPinsNeedingDrivers.empty() )
                         pinsToMark = nonPowerPinsNeedingDrivers;
                     else
                         pinsToMark = pinsNeedingDrivers;
                 }
                 else
                 {
-                    if( !nonPowerPinsNeedingDrivers.empty() )
-                        pinsToMark.push_back( nonPowerPinsNeedingDrivers.front() );
+                    if( ispowerNet && !powerInPinsNeedingDrivers.empty() )
+                        pinsToMark.push_back( powerInPinsNeedingDrivers.front() );
                     else
                         pinsToMark.push_back( &needsDriver );
                 }
@@ -1974,6 +1985,12 @@ int ERC_TESTER::TestLibSymbolIssues()
 int ERC_TESTER::TestFootprintLinkIssues( KIFACE* aCvPcb, PROJECT* aProject )
 {
     wxCHECK( m_schematic, 0 );
+
+    if( std::optional<LIBRARY_MANAGER_ADAPTER*> adapter =
+                Pgm().GetLibraryManager().Adapter( LIBRARY_TABLE_TYPE::FOOTPRINT ) )
+    {
+        ( *adapter )->BlockUntilLoaded();
+    }
 
     wxString msg;
     int      err_count = 0;

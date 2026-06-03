@@ -202,6 +202,8 @@ protected:
         }
         else
         {
+            Pgm().GetLibraryManager().ApplyLibOverrides( *child );
+
             m_panel->OpenTable( child, aRow.Nickname() );
         }
     }
@@ -223,9 +225,14 @@ protected:
 
 void PANEL_SYM_LIB_TABLE::OpenTable( const std::shared_ptr<LIBRARY_TABLE>& aTable, const wxString& aTitle )
 {
+    wxString tabTitle = aTitle;
+
+    if( aTable->IsReadOnly() )
+        tabTitle += wxS( " " ) + _( "(read-only)" );
+
     for( int ii = 2; ii < (int) m_notebook->GetPageCount(); ++ii )
     {
-        if( m_notebook->GetPageText( ii ) == aTitle )
+        if( m_notebook->GetPageText( ii ) == tabTitle )
         {
             // Something is pretty fishy with wxAuiNotebook::ChangeSelection(); on Mac at least it
             // results in a re-entrant call where the second call is one page behind.
@@ -237,7 +244,7 @@ void PANEL_SYM_LIB_TABLE::OpenTable( const std::shared_ptr<LIBRARY_TABLE>& aTabl
     }
 
     m_nestedTables.push_back( aTable );
-    AddTable( aTable.get(), aTitle, true );
+    AddTable( aTable.get(), tabTitle, true );
 
     // Something is pretty fishy with wxAuiNotebook::ChangeSelection(); on Mac at least it
     // results in a re-entrant call where the second call is one page behind.
@@ -806,16 +813,19 @@ void PANEL_SYM_LIB_TABLE::onConvertLegacyLibraries( wxCommandEvent& event )
 
     wxArrayInt legacyRows;
     wxString   databaseType = SCH_IO_MGR::ShowType( SCH_IO_MGR::SCH_DATABASE );
+    wxString   httpType = SCH_IO_MGR::ShowType( SCH_IO_MGR::SCH_HTTP );
     wxString   kicadType = SCH_IO_MGR::ShowType( SCH_IO_MGR::SCH_KICAD );
     wxString   msg;
 
+    // HTTP and Database libraries are live, dynamic backends that are not file-based.
+    // Migrating them to a static .kicad_sym snapshot is not meaningful and would silently
+    // produce an empty library, destroying the original table entry.
     for( int row : selectedRows )
     {
-        if( cur_grid()->GetCellValue( row, COL_TYPE ) != databaseType
-                && cur_grid()->GetCellValue( row, COL_TYPE ) != kicadType )
-        {
+        const wxString& type = cur_grid()->GetCellValue( row, COL_TYPE );
+
+        if( type != databaseType && type != httpType && type != kicadType )
             legacyRows.push_back( row );
-        }
     }
 
     if( legacyRows.size() <= 0 )

@@ -531,7 +531,7 @@ LIB_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseLibSymbol( LIB_SYMBOL_MAP& aSymbolLi
 
             m_bodyStyle = static_cast<int>( tmp );
 
-            if( m_bodyStyle > 1 )
+            if( m_bodyStyle > symbol->GetBodyStyleCount() )
                 symbol->SetBodyStyleCount( m_bodyStyle, false, false );
 
             if( m_unit > symbol->GetUnitCount() )
@@ -2371,6 +2371,13 @@ SCH_FIELD* SCH_IO_KICAD_SEXPR_PARSER::parseSchField( SCH_ITEM* aParent )
         THROW_PARSE_ERROR( _( "Empty property name" ), CurSource(), CurLine(), CurLineNumber(),
                            CurOffset() );
     }
+
+    // Normalise legacy/cross-locale directive-label net class field names to the canonical
+    // "Netclass" token as early as possible so every downstream consumer (including ones that
+    // call GetName() directly instead of GetCanonicalName()) sees a consistent in-memory model.
+    // See issue #24403.
+    if( dynamic_cast<SCH_LABEL_BASE*>( aParent ) && SCH_FIELD::IsNetclassLabelFieldName( name ) )
+        name = wxT( "Netclass" );
 
     token = NextTok();
 

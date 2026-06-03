@@ -32,6 +32,7 @@
 #include <libraries/library_table.h>
 #include <libraries/library_table_parser.h>
 #include <libraries/library_table_grammar.h>
+#include <settings/kicad_settings.h>
 
 
 BOOST_AUTO_TEST_SUITE( LibraryTables )
@@ -154,6 +155,27 @@ BOOST_AUTO_TEST_CASE( Manager )
 
     BOOST_REQUIRE( manager.Rows( LIBRARY_TABLE_TYPE::SYMBOL ).size() == 3 );
     BOOST_REQUIRE( manager.Rows( LIBRARY_TABLE_TYPE::FOOTPRINT ).size() == 146 );
+}
+
+
+// Regression coverage for the LoadGlobalTables guard: when a global library
+// table file does not exist on disk, loadTables() never inserts an entry for
+// that type into m_tables, so Table( aType, GLOBAL ) must return std::nullopt
+// instead of an entry holding a null pointer. The cleanupRemovedPCMLibraries
+// lambda inside LoadGlobalTables relies on this contract via .value_or(
+// nullptr ) and must not dereference the result. Exercising the full PCM
+// cleanup path requires extensive environment setup (3RD_PARTY env var plus
+// PCM auto-remove enabled in user settings), so we test the underlying
+// contract directly here.
+BOOST_AUTO_TEST_CASE( ManagerTableReturnsNulloptForUnloadedType )
+{
+    LIBRARY_MANAGER manager;
+
+    auto result = manager.Table( LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_SCOPE::GLOBAL );
+    BOOST_REQUIRE( !result.has_value() );
+
+    LIBRARY_TABLE* table = result.value_or( nullptr );
+    BOOST_REQUIRE( table == nullptr );
 }
 
 
@@ -322,6 +344,94 @@ BOOST_AUTO_TEST_CASE( IsPcmManagedRow_URITemplateMatching )
                                   c.description, c.uri, c.expectedPcmManaged ? 1 : 0,
                                   actual ? 1 : 0 ) );
     }
+}
+
+
+BOOST_AUTO_TEST_CASE( ReadOnlyTable )
+{
+    // Create a temporary copy of a library table and make it read-only
+    wxFileName fn( KI_TEST::GetTestDataRootDir(), wxEmptyString );
+    fn.AppendDir( "libraries" );
+    fn.SetName( "sym-lib-table" );
+
+    wxFileName tmpFn = wxFileName::CreateTempFileName( "kicad_test_ro_" );
+    wxCopyFile( fn.GetFullPath(), tmpFn.GetFullPath() );
+
+    // Verify a writable table is not read-only
+    {
+        LIBRARY_TABLE writableTable( tmpFn, LIBRARY_TABLE_SCOPE::GLOBAL );
+        BOOST_REQUIRE( writableTable.IsOk() );
+        BOOST_REQUIRE( !writableTable.IsReadOnly() );
+    }
+
+    // Make the file read-only
+    tmpFn.SetPermissions( wxS_IRUSR | wxS_IRGRP | wxS_IROTH );
+
+    // CI containers commonly run as root, where access(W_OK) succeeds regardless of the
+    // permission bits, so a read-only file still reports as writable.  IsReadOnly() uses the
+    // same IsFileWritable() check, so when the file remains writable here the read-only
+    // assertions cannot hold and are not meaningful.
+    if( wxFileName( tmpFn.GetFullPath() ).IsFileWritable() )
+    {
+        BOOST_TEST_MESSAGE( "Skipping read-only table checks; file remains writable despite "
+                            "read-only permissions (running as root?)" );
+    }
+    else
+    {
+        LIBRARY_TABLE roTable( tmpFn, LIBRARY_TABLE_SCOPE::GLOBAL );
+        BOOST_REQUIRE( roTable.IsOk() );
+        BOOST_REQUIRE( roTable.IsReadOnly() );
+
+        // Save should return an error for read-only tables
+        LIBRARY_RESULT<void> result = roTable.Save();
+        BOOST_REQUIRE( !result.has_value() );
+    }
+
+    // Clean up
+    tmpFn.SetPermissions( wxS_IRUSR | wxS_IWUSR );
+    wxRemoveFile( tmpFn.GetFullPath() );
+}
+
+
+BOOST_AUTO_TEST_CASE( LibOverrideSettings )
+{
+    // Test that LIB_OVERRIDE serialization in KICAD_SETTINGS works via the
+    // LIBRARY_MANAGER override API.
+    LIBRARY_MANAGER manager;
+
+    wxString tablePath = wxT( "/some/read-only/path/sym-lib-table" );
+    wxString nickname1 = wxT( "LibA" );
+    wxString nickname2 = wxT( "LibB" );
+
+    // Set an override
+    manager.SetLibOverride( tablePath, nickname1, true, false );
+    manager.SetLibOverride( tablePath, nickname2, false, true );
+
+    // Verify overrides via settings
+    SETTINGS_MANAGER& mgr = Pgm().GetSettingsManager();
+    KICAD_SETTINGS*   settings = mgr.GetAppSettings<KICAD_SETTINGS>( "kicad" );
+
+    BOOST_REQUIRE( settings != nullptr );
+    BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 1 );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath].count( nickname1 ) == 1 );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath][nickname1].disabled == true );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath][nickname1].hidden == false );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath][nickname2].disabled == false );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath][nickname2].hidden == true );
+
+    // Clear override (both disabled and hidden are false)
+    manager.ClearLibOverride( tablePath, nickname1 );
+    BOOST_REQUIRE( settings->m_LibOverrides[tablePath].count( nickname1 ) == 0 );
+
+    // Clear last entry should remove the table key too
+    manager.ClearLibOverride( tablePath, nickname2 );
+    BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 0 );
+
+    // SetLibOverride with both false should also clear
+    manager.SetLibOverride( tablePath, nickname1, true, false );
+    BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 1 );
+    manager.SetLibOverride( tablePath, nickname1, false, false );
+    BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 0 );
 }
 
 

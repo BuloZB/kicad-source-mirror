@@ -99,6 +99,7 @@
 #include <tools/pcb_edit_table_tool.h>
 #include <tools/pcb_group_tool.h>
 #include <tools/generator_tool.h>
+#include <tools/diff_phase_skew_tool.h>
 #include <tools/drc_tool.h>
 #include <tools/drc_rule_editor_tool.h>
 #include <tools/global_edit_tool.h>
@@ -822,14 +823,14 @@ void PCB_EDIT_FRAME::detachTextVarTracker()
 }
 
 
-void PCB_EDIT_FRAME::SetBoard( BOARD* aBoard, bool aBuildConnectivity,
-                               PROGRESS_REPORTER* aReporter )
+void PCB_EDIT_FRAME::SetBoard( BOARD* aBoard, bool aBuildConnectivity, PROGRESS_REPORTER* aReporter )
 {
-    // PCB_BASE_FRAME::SetBoard deletes m_pcb; detach tracker consumers first.
+    // PCB_BASE_FRAME::SetBoard() deletes m_pcb; detach tracker consumers first.
     if( m_pcb )
     {
         detachTextVarTracker();
         m_pcb->ClearProject();
+        Kiway().LocalHistory().UnregisterSaver( m_pcb );
     }
 
     PCB_BASE_EDIT_FRAME::SetBoard( aBoard, aReporter );
@@ -1039,6 +1040,7 @@ void PCB_EDIT_FRAME::setupTools()
     m_toolManager->RegisterTool( new MULTICHANNEL_TOOL );
     m_toolManager->RegisterTool( new EMBED_TOOL );
     m_toolManager->RegisterTool( new DRC_RULE_EDITOR_TOOL );
+    m_toolManager->RegisterTool( new DIFF_PHASE_SKEW_TOOL );
     m_toolManager->InitTools();
 
     for( TOOL_BASE* tool : m_toolManager->Tools() )
@@ -1387,6 +1389,7 @@ void PCB_EDIT_FRAME::setupUIConditions()
     CURRENT_EDIT_TOOL( PCB_ACTIONS::tuneSingleTrack);
     CURRENT_EDIT_TOOL( PCB_ACTIONS::tuneDiffPair );
     CURRENT_EDIT_TOOL( PCB_ACTIONS::tuneSkew );
+    CURRENT_EDIT_TOOL( PCB_ACTIONS::showDiffPhaseSkew );
     CURRENT_EDIT_TOOL( PCB_ACTIONS::drawVia );
     CURRENT_EDIT_TOOL( PCB_ACTIONS::drawZone );
     CURRENT_EDIT_TOOL( PCB_ACTIONS::drawRuleArea );
@@ -1463,7 +1466,8 @@ void PCB_EDIT_FRAME::ResolveDRCExclusions( bool aCreateMarkers )
 bool PCB_EDIT_FRAME::canCloseWindow( wxCloseEvent& aEvent )
 {
     // Shutdown blocks must be determined and vetoed as early as possible
-    if( KIPLATFORM::APP::SupportsShutdownBlockReason() && aEvent.GetId() == wxEVT_QUERY_END_SESSION
+    if( KIPLATFORM::APP::SupportsShutdownBlockReason()
+            && aEvent.GetId() == wxEVT_QUERY_END_SESSION
             && IsContentModified() )
     {
         return false;
@@ -1532,8 +1536,8 @@ bool PCB_EDIT_FRAME::canCloseWindow( wxCloseEvent& aEvent )
 
             if( !projPath.IsEmpty() && Kiway().LocalHistory().HistoryExists( projPath ) )
             {
-                Kiway().LocalHistory().CommitDuplicateOfLastSave( projPath, wxS("pcb"),
-                        wxS("Discard unsaved pcb changes") );
+                Kiway().LocalHistory().CommitDuplicateOfLastSave( projPath, wxS( "pcb" ),
+                                                                  wxS( "Discard unsaved pcb changes" ) );
             }
         }
     }
@@ -1560,13 +1564,11 @@ void PCB_EDIT_FRAME::doCloseWindow()
 
 #ifdef KICAD_IPC_API
     Pgm().GetApiServer().DeregisterHandler( m_apiHandler.get() );
-    wxTheApp->Unbind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED,
-                      &PCB_EDIT_FRAME::onPluginAvailabilityChanged, this );
+    wxTheApp->Unbind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED, &PCB_EDIT_FRAME::onPluginAvailabilityChanged, this );
 #endif
 
     // Clean up mode-less dialogs.
-    Unbind( EDA_EVT_CLOSE_DIALOG_BOOK_REPORTER, &PCB_EDIT_FRAME::onCloseModelessBookReporterDialogs,
-            this );
+    Unbind( EDA_EVT_CLOSE_DIALOG_BOOK_REPORTER, &PCB_EDIT_FRAME::onCloseModelessBookReporterDialogs, this );
 
     wxWindow* drcDlg = wxWindow::FindWindowByName( DIALOG_DRC_WINDOW_NAME );
 
@@ -1577,7 +1579,6 @@ void PCB_EDIT_FRAME::doCloseWindow()
 
     if( ruleEditorDlg )
         ruleEditorDlg->Close( true );
-
 
     if( m_findDialog )
     {
@@ -1620,8 +1621,7 @@ void PCB_EDIT_FRAME::doCloseWindow()
     // leftover the user explicitly deferred in the recovery dialog.
     if( !Prj().IsNullProject() && GetBoard() && IsContentModified() )
     {
-        Kiway().LocalHistory().RemoveAutosaveFiles( Prj().GetProjectPath(),
-                                                    { GetBoard()->GetFileName() } );
+        Kiway().LocalHistory().RemoveAutosaveFiles( Prj().GetProjectPath(), { GetBoard()->GetFileName() } );
     }
 
     // Make sure local settings are persisted

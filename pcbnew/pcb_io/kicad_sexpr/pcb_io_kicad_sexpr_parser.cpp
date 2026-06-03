@@ -1991,6 +1991,11 @@ void PCB_IO_KICAD_SEXPR_PARSER::parseBoardStackup()
     // Remove existing stack or we end up just appending to the existing stackup
     stackup.RemoveAll();
 
+    // Board appends in older versions could duplicate the whole stackup.  Stop adding items once
+    // a board layer id repeats; still parse the duplicates to keep the token stream consistent.
+    std::set<PCB_LAYER_ID> seenBrdLayers;
+    bool                   duplicatedStackup = false;
+
     for( token = NextTok(); token != T_RIGHT; token = NextTok() )
     {
         if( CurTok() != T_LEFT )
@@ -2072,6 +2077,9 @@ void PCB_IO_KICAD_SEXPR_PARSER::parseBoardStackup()
         std::unique_ptr<BOARD_STACKUP_ITEM> itemOwner;
         BOARD_STACKUP_ITEM*                 item = nullptr;
 
+        if( layerId != UNDEFINED_LAYER && !seenBrdLayers.insert( layerId ).second )
+            duplicatedStackup = true;
+
         if( type != BS_ITEM_TYPE_UNDEFINED )
         {
             // A 32-copper-layer board has at most 69 stackup items (32 copper +
@@ -2087,7 +2095,7 @@ void PCB_IO_KICAD_SEXPR_PARSER::parseBoardStackup()
             if( type == BS_ITEM_TYPE_DIELECTRIC )
                 item->SetDielectricLayerId( dielectric_idx++ );
 
-            if( stackup.GetCount() < MAX_STACKUP_ITEMS )
+            if( !duplicatedStackup && stackup.GetCount() < MAX_STACKUP_ITEMS )
                 stackup.Add( itemOwner.release() );
         }
         else
@@ -6523,6 +6531,21 @@ PAD* PCB_IO_KICAD_SEXPR_PARSER::parsePAD( FOOTPRINT* aParent )
             pad->SetPinType( FromUTF8() );
             NeedRIGHT();
             break;
+
+        case T_sim_electrical_type:
+        {
+            token = NextTok();
+
+            switch( token )
+            {
+            case T_source: pad->SetSimElectricalType( PAD_SIM_ELECTRICAL_TYPE::SOURCE ); break;
+            case T_sink: pad->SetSimElectricalType( PAD_SIM_ELECTRICAL_TYPE::SINK ); break;
+            default: Expecting( "sink or source" );
+            }
+
+            NeedRIGHT();
+            break;
+        }
 
         case T_die_length:
             pad->SetPadToDieLength( parseBoardUnits( T_die_length ) );

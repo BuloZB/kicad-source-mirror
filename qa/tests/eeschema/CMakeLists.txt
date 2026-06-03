@@ -53,6 +53,7 @@ set( QA_EESCHEMA_SRCS
     sch_io/pads/test_pads_sch_parser.cpp
     sch_io/pads/test_pads_sch_import.cpp
     sch_io/geda/test_geda_sch_import.cpp
+    sch_io/diptrace/test_diptrace_sch_import.cpp
 
     erc/test_erc_four_way.cpp
 	erc/test_erc_label_not_connected.cpp
@@ -71,10 +72,13 @@ set( QA_EESCHEMA_SRCS
     erc/test_erc_bus_member_label_local_pins.cpp
     erc/test_erc_marker_deduplication.cpp
     erc/test_erc_net_chain_pin_to_pin.cpp
+    erc/test_erc_power_pin_marker_location.cpp
+    erc/test_erc_lib_symbol_mismatch.cpp
 
     test_schematic_text_var_reactive.cpp
     test_annotation_refdes_tracker_units.cpp
     test_annotation_units_conflicts.cpp
+    test_issue24314_power_flag_designators.cpp
     test_annotation_units_integration.cpp
     test_connectivity_algo.cpp
     test_issue18119_bus_hierarchy.cpp
@@ -83,6 +87,8 @@ set( QA_EESCHEMA_SRCS
     test_issue20173_paste_subsheet.cpp
     test_issue22286_pin_alternate.cpp
     test_issue22620_group_annotation.cpp
+    test_issue24335_group_move_ancestor.cpp
+    test_sch_item_swap_group.cpp
     test_issue22651_sheet_annotation.cpp
     test_issue22864_align_sheet_pins.cpp
     test_issue22938_local_power.cpp
@@ -97,8 +103,12 @@ set( QA_EESCHEMA_SRCS
     test_issue24072_symbol_arc_edit_mode.cpp
     test_issue24290_local_labels_across_top_sheets.cpp
     test_issue24217_cli_variant_export.cpp
+    test_issue24409_cli_hierarchical_instances.cpp
+    test_issue24360_root_sheetname.cpp
     test_issue16915_bus_netclass.cpp
     test_issue24220_hierarchical_bus_netclass.cpp
+    test_issue24297_http_migrate.cpp
+    test_issue24403_directive_label_i18n.cpp
     test_nc_pin_connectivity.cpp
     test_crossing_label.cpp
     test_eagle_plugin.cpp
@@ -113,6 +123,7 @@ set( QA_EESCHEMA_SRCS
     test_lib_part.cpp
     test_ee_grid_helper.cpp
     test_netlist_exporter_kicad.cpp
+    test_issue24330_netlist_pin_truncation.cpp
     test_ee_item.cpp
     test_incremental_netlister.cpp
     test_legacy_power_symbols.cpp

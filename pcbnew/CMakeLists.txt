@@ -47,6 +47,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_copper_zones_base.cpp
     dialogs/dialog_create_array.cpp
     dialogs/dialog_create_array_base.cpp
+    dialogs/dialog_diff_phase_skew_properties.cpp
+    dialogs/dialog_diff_phase_skew_properties_base.cpp
     dialogs/dialog_dimension_properties.cpp
     dialogs/dialog_dimension_properties_base.cpp
     dialogs/dialog_drc.cpp
@@ -450,6 +452,7 @@ set( PCBNEW_CLASS_SRCS
     tools/board_inspection_tool.cpp
     tools/board_reannotate_tool.cpp
     tools/convert_tool.cpp
+    tools/diff_phase_skew_tool.cpp
     tools/drawing_tool.cpp
     tools/drc_tool.cpp
     tools/edit_tool.cpp
@@ -641,8 +644,9 @@ add_subdirectory( pcb_io/ipc2581 )
 add_subdirectory( pcb_io/odbpp )
 add_subdirectory( pcb_io/pads )
 add_subdirectory( pcb_io/sprint_layout )
+add_subdirectory( pcb_io/diptrace )
 
-set( PCBNEW_IO_LIBRARIES pcad2kicadpcb allegro2pcbnew altium2pcbnew cadstar2pcbnew easyeda easyedapro fabmaster ipc2581 odbpp pads2pcbnew sprint_layout2pcbnew CACHE INTERNAL "")
+set( PCBNEW_IO_LIBRARIES pcad2kicadpcb allegro2pcbnew altium2pcbnew cadstar2pcbnew easyeda easyedapro fabmaster ipc2581 odbpp pads2pcbnew sprint_layout2pcbnew diptrace2pcbnew CACHE INTERNAL "")
 
 #a very small program launcher for pcbnew_kiface
 add_executable( pcbnew WIN32 MACOSX_BUNDLE

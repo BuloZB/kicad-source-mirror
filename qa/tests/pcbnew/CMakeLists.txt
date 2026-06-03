@@ -81,6 +81,7 @@ set( QA_PCBNEW_SRCS
     test_step_model_color_transfer.cpp
     test_pdf_output_path.cpp
     test_shape_corner_radius.cpp
+    test_shape_hatch_knockout.cpp
     test_pcb_grid_helper.cpp
     test_save_load.cpp
     test_stacked_pin_netlist.cpp
@@ -104,6 +105,7 @@ set( QA_PCBNEW_SRCS
     net_chains/test_net_chain_total_length_sexpr.cpp
     net_chains/test_net_chain_bridging_delay.cpp
     net_chains/test_net_chain_partition.cpp
+    net_chains/test_net_chain_trunk_delay.cpp
     net_chains/test_tuning_bridging_clamp.cpp
 
     drc/test_custom_rule_severities.cpp
@@ -120,6 +122,7 @@ set( QA_PCBNEW_SRCS
     drc/test_solder_mask_bridging.cpp
     drc/test_solder_mask_bridge_all_tracks.cpp
     drc/test_solder_mask_track_to_pad.cpp
+    drc/test_drc_solder_mask_npth_bridge.cpp
     drc/test_drc_multi_netclasses.cpp
     drc/test_drc_skew.cpp
     drc/test_drc_component_classes.cpp
@@ -148,8 +151,10 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_creepage_issue23389.cpp
     drc/test_drc_creepage_issue23576.cpp
     drc/test_drc_creepage_issue23658.cpp
+    drc/test_drc_creepage_issue23578.cpp
     drc/test_drc_invalid_outline_issue24078.cpp
     drc/test_drc_invalid_outline_issue24241.cpp
+    drc/test_drc_silk_rule_area_issue24177.cpp
     drc/test_drc_annular_overlap_issue24340.cpp
     drc/test_drc_hole_clearance_issue24355.cpp
     drc/test_drc_issue24264.cpp
@@ -165,6 +170,7 @@ set( QA_PCBNEW_SRCS
     pcb_io/cadstar/test_cadstar_footprints.cpp
     pcb_io/eagle/test_eagle_board_import.cpp
     pcb_io/eagle/test_eagle_lbr_import.cpp
+    pcb_io/eagle/test_eagle_managed_lib_naming.cpp
     pcb_io/pads/test_pads_import.cpp
     pcb_io/pads/test_pads_layer_mapper.cpp
     pcb_io/pads/test_pads_arc_structures.cpp
@@ -176,6 +182,10 @@ set( QA_PCBNEW_SRCS
     pcb_io/kicad_sexpr/test_kicad_sexpr.cpp
 
     pcb_io/easyedapro/test_easyedapro_import.cpp
+
+    pcb_io/diptrace/test_diptrace_import.cpp
+    pcb_io/diptrace/test_diptrace_cross_link.cpp
+    pcb_io/diptrace/test_diptrace_benchmarks.cpp
 
     pcb_io/fabmaster/test_fabmaster_import.cpp
 

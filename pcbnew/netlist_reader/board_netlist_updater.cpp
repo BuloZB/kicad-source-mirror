@@ -65,6 +65,7 @@ BOARD_NETLIST_UPDATER::BOARD_NETLIST_UPDATER( PCB_EDIT_FRAME* aFrame, BOARD* aBo
     m_replaceFootprints = true;
     m_lookupByTimestamp = false;
     m_transferGroups = false;
+    m_applyDesignBlockLayouts = false;
     m_overrideLocks = false;
     m_updateFields = false;
     m_removeExtraFields = false;
@@ -768,7 +769,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, CO
     if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasExcludedFromBOM )
         netlistExcludeFromBOM = firstAssociatedVariant->m_excludedFromBOM;
 
-    if( netlistExcludeFromBOM != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_BOM ) > 0 ) )
+    if( m_updateFields && netlistExcludeFromBOM != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_BOM ) > 0 ) )
     {
         if( m_isDryRun )
         {
@@ -804,7 +805,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, CO
     if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasDnp )
         netlistDNP = firstAssociatedVariant->m_dnp;
 
-    if( netlistDNP != ( ( aFootprint->GetAttributes() & FP_DNP ) > 0 ) )
+    if( m_updateFields && netlistDNP != ( ( aFootprint->GetAttributes() & FP_DNP ) > 0 ) )
     {
         if( m_isDryRun )
         {
@@ -840,7 +841,8 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, CO
     if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasExcludedFromPosFiles )
         netlistExcludeFromPosFiles = firstAssociatedVariant->m_excludedFromPosFiles;
 
-    if( netlistExcludeFromPosFiles != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_POS_FILES ) > 0 ) )
+    if( m_updateFields
+        && netlistExcludeFromPosFiles != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_POS_FILES ) > 0 ) )
     {
         if( m_isDryRun )
         {
@@ -879,8 +881,8 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, CO
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( aNetlistComponent->GetDuplicatePadNumbersAreJumpers()
-        != aFootprint->GetDuplicatePadNumbersAreJumpers() )
+    if( m_updateFields
+        && aNetlistComponent->GetDuplicatePadNumbersAreJumpers() != aFootprint->GetDuplicatePadNumbersAreJumpers() )
     {
         bool value = aNetlistComponent->GetDuplicatePadNumbersAreJumpers();
 
@@ -917,7 +919,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, CO
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( aNetlistComponent->JumperPadGroups() != aFootprint->JumperPadGroups() )
+    if( m_updateFields && aNetlistComponent->JumperPadGroups() != aFootprint->JumperPadGroups() )
     {
         if( !m_isDryRun )
         {
@@ -1040,6 +1042,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintGroup( FOOTPRINT* aPcbFootprint,
                 // board groups for later footprints that are checking for existing groups
                 m_board->Add( newGroup );
                 m_commit.Added( newGroup );
+                m_addedGroups.push_back( newGroup );
             }
             else
             {

@@ -29,6 +29,7 @@
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <app_monitor.h>
@@ -1625,10 +1626,45 @@ void CONNECTION_GRAPH::buildItemSubGraphs()
             m_bus_alias_cache[alias->GetName()] = alias;
     }
 
-    // Build subgraphs from items (on a per-sheet basis)
+    // Hash position in m_sheetList for each sheet path so that subgraphs are
+    // created in a deterministic order matching the sheet hierarchy
+    // https://gitlab.com/kicad/code/kicad/-/issues/24409
+    std::unordered_map<SCH_SHEET_PATH, size_t> sheetOrder;
+    sheetOrder.reserve( m_sheetList.size() );
+
+    for( size_t i = 0; i < m_sheetList.size(); ++i )
+        sheetOrder.emplace( m_sheetList[i], i );
+
+    auto sheetRank =
+            [&]( const SCH_SHEET_PATH& aSheet ) -> size_t
+            {
+                auto it = sheetOrder.find( aSheet );
+
+                return ( it == sheetOrder.end() ) ? std::numeric_limits<size_t>::max()
+                                                  : it->second;
+            };
+
+    // Build subgraphs from items (on a per-sheet basis).  Reuse the vector across
+    // items so a flat schematic doesn't allocate per item.
+    std::vector<std::tuple<size_t, SCH_SHEET_PATH, SCH_CONNECTION*>> ordered;
+
     for( SCH_ITEM* item : m_items )
     {
+        ordered.clear();
+        ordered.reserve( item->m_connection_map.size() );
+
+        // Precompute sheet rank into the tuple so the comparator never re-hashes
+        // the (vector-backed) SCH_SHEET_PATH keys.
         for( const auto& [sheet, connection] : item->m_connection_map )
+            ordered.emplace_back( sheetRank( sheet ), sheet, connection );
+
+        std::sort( ordered.begin(), ordered.end(),
+                   []( const auto& a, const auto& b )
+                   {
+                       return std::get<0>( a ) < std::get<0>( b );
+                   } );
+
+        for( const auto& [rank, sheet, connection] : ordered )
         {
             if( connection->SubgraphCode() == 0 )
             {
@@ -1674,9 +1710,8 @@ void CONNECTION_GRAPH::buildItemSubGraphs()
                         connected_conn->SetSubgraphCode( subgraph->m_code );
                         m_item_to_subgraph_map[connected_item] = subgraph;
                         subgraph->AddItem( connected_item );
-                        const SCH_ITEM_VEC& citemset = connected_item->ConnectedItems( sheet );
 
-                        for( SCH_ITEM* citem : citemset )
+                        for( SCH_ITEM* citem : connected_item->ConnectedItems( sheet ) )
                         {
                             if( citem->HasFlag( CONNECTIVITY_CANDIDATE ) )
                                 continue;
@@ -1854,9 +1889,7 @@ void CONNECTION_GRAPH::generateBusAliasMembers()
 
     for( CONNECTION_SUBGRAPH* subgraph : m_driver_subgraphs )
     {
-        SCH_ITEM_VEC vec = subgraph->GetAllBusLabels();
-
-        for( SCH_ITEM* item : vec )
+        for( SCH_ITEM* item : subgraph->GetAllBusLabels() )
         {
             SCH_LABEL_BASE* label = static_cast<SCH_LABEL_BASE*>( item );
 
@@ -2917,6 +2950,8 @@ void CONNECTION_GRAPH::buildConnectionGraph( std::function<void( SCH_ITEM* )>* a
     }
 
     RebuildNetChains();
+
+    ApplyNetChainNetclasses();
 }
 
 std::function<void( CONNECTION_GRAPH& )>& CONNECTION_GRAPH::RebuildNetChainsTestHook()
@@ -4120,6 +4155,51 @@ SCH_NETCHAIN* CONNECTION_GRAPH::GetNetChainForNet( const wxString& aNet )
 
     wxLogTrace( traceSchNetChain, "GetNetChainForNet: no chain found" );
     return nullptr;
+}
+
+
+void CONNECTION_GRAPH::ApplyNetChainNetclasses()
+{
+    if( !m_schematic )
+        return;
+
+    std::shared_ptr<NET_SETTINGS> netSettings = m_schematic->Project().GetProjectFile().NetSettings();
+
+    if( !netSettings )
+        return;
+
+    bool anyOverride = std::any_of( m_committedNetChains.begin(), m_committedNetChains.end(),
+                                    []( const std::unique_ptr<SCH_NETCHAIN>& aChain )
+                                    {
+                                        return aChain && !aChain->GetNetClass().IsEmpty();
+                                    } );
+
+    // The common no-chain path must not wipe the effective-netclass cache on every connectivity
+    // rebuild.  Only rebuild when a chain carries an override or a prior pass left stale entries.
+    if( !anyOverride && !netSettings->HasChainPatternAssignments() )
+        return;
+
+    netSettings->ClearChainPatternAssignments();
+
+    for( const std::unique_ptr<SCH_NETCHAIN>& chain : m_committedNetChains )
+    {
+        if( !chain )
+            continue;
+
+        const wxString& netclass = chain->GetNetClass();
+
+        if( netclass.IsEmpty() || !netSettings->HasNetclass( netclass ) )
+            continue;
+
+        for( const wxString& net : chain->GetNets() )
+        {
+            // Synthetic per-run keys embed a subgraph code and never match a resolved net name.
+            if( net.StartsWith( SCH_NETCHAIN::SYNTHETIC_NET_PREFIX ) )
+                continue;
+
+            netSettings->SetChainPatternAssignment( net, netclass );
+        }
+    }
 }
 
 
@@ -5676,6 +5756,28 @@ bool CONNECTION_GRAPH::ercCheckFloatingWires( const CONNECTION_SUBGRAPH* aSubgra
 }
 
 
+void CONNECTION_GRAPH::collectBusMemberSiblings( const CONNECTION_SUBGRAPH* aBusParent, const wxString& aMemberName,
+                                                 std::unordered_set<const CONNECTION_SUBGRAPH*>& aOut ) const
+{
+    auto busBucket = m_net_name_to_subgraphs_map.find( aBusParent->m_driver_connection->Name() );
+
+    if( busBucket == m_net_name_to_subgraphs_map.end() )
+        return;
+
+    for( const CONNECTION_SUBGRAPH* siblingBus : busBucket->second )
+    {
+        for( const auto& [sibMemberConn, sibMembers] : siblingBus->m_bus_neighbors )
+        {
+            if( sibMemberConn->Name() != aMemberName )
+                continue;
+
+            for( const CONNECTION_SUBGRAPH* sibling : sibMembers )
+                aOut.insert( sibling );
+        }
+    }
+}
+
+
 bool CONNECTION_GRAPH::ercCheckLabels( const CONNECTION_SUBGRAPH* aSubgraph )
 {
     // Label connection rules:
@@ -5759,30 +5861,27 @@ bool CONNECTION_GRAPH::ercCheckLabels( const CONNECTION_SUBGRAPH* aSubgraph )
     if( label_map.empty() )
         return true;
 
-    // No-connects on net neighbors will be noticed before, but to notice them on bus parents we
-    // need to walk the graph
-    for( auto& [ connection, subgraphs ] : aSubgraph->m_bus_parents )
+    // Walk m_bus_parents once. Bus parents may carry a no-connect that suppresses
+    // an unconnected-label error, and they're how we reach bus members on other
+    // sheets that share this net.
+    std::unordered_set<const CONNECTION_SUBGRAPH*> busMemberSiblings;
+
+    for( auto& [memberConn, busParents] : aSubgraph->m_bus_parents )
     {
-        for( CONNECTION_SUBGRAPH* busParent : subgraphs )
+        wxString memberName = memberConn->Name();
+
+        for( CONNECTION_SUBGRAPH* busParent : busParents )
         {
             if( busParent->m_no_connect )
-            {
                 has_nc = true;
-                break;
-            }
 
-            CONNECTION_SUBGRAPH* hp = busParent->m_hier_parent;
-
-            while( hp )
+            for( CONNECTION_SUBGRAPH* hp = busParent->m_hier_parent; hp; hp = hp->m_hier_parent )
             {
                 if( hp->m_no_connect )
-                {
                     has_nc = true;
-                    break;
-                }
-
-                hp = hp->m_hier_parent;
             }
+
+            collectBusMemberSiblings( busParent, memberName, busMemberSiblings );
         }
     }
 
@@ -5838,33 +5937,41 @@ bool CONNECTION_GRAPH::ercCheckLabels( const CONNECTION_SUBGRAPH* aSubgraph )
                 }
             }
 
+            std::unordered_set<const CONNECTION_SUBGRAPH*> creditedNeighbors;
+            creditedNeighbors.insert( aSubgraph );
+
+            auto creditNeighbor = [&]( const CONNECTION_SUBGRAPH* neighbor )
+            {
+                if( !creditedNeighbors.insert( neighbor ).second )
+                    return;
+
+                if( neighbor->m_no_connect )
+                    has_nc = true;
+
+                size_t neighborPins = hasPins( neighbor );
+                allPins += neighborPins;
+
+                if( neighbor->m_sheet == sheet )
+                {
+                    localPins += neighborPins;
+
+                    if( !neighbor->m_hier_pins.empty() || !neighbor->m_hier_ports.empty() )
+                    {
+                        hasLocalHierarchy = true;
+                    }
+                }
+            };
+
             auto it = m_net_name_to_subgraphs_map.find( netName );
 
             if( it != m_net_name_to_subgraphs_map.end() )
             {
                 for( const CONNECTION_SUBGRAPH* neighbor : it->second )
-                {
-                    if( neighbor == aSubgraph )
-                        continue;
-
-                    if( neighbor->m_no_connect )
-                        has_nc = true;
-
-                    size_t neighborPins = hasPins( neighbor );
-                    allPins += neighborPins;
-
-                    if( neighbor->m_sheet == sheet )
-                    {
-                        localPins += neighborPins;
-
-                        if( !neighbor->m_hier_pins.empty()
-                            || !neighbor->m_hier_ports.empty() )
-                        {
-                            hasLocalHierarchy = true;
-                        }
-                    }
-                }
+                    creditNeighbor( neighbor );
             }
+
+            for( const CONNECTION_SUBGRAPH* sibling : busMemberSiblings )
+                creditNeighbor( sibling );
 
             if( allPins == 1 && !has_nc )
             {

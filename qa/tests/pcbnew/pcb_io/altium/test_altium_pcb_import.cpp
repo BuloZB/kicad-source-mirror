@@ -35,15 +35,19 @@
 
 #include <board.h>
 #include <board_design_settings.h>
+#include <board_stackup_manager/board_stackup.h>
 #include <netinfo.h>
 #include <netclass.h>
+#include <pcb_track.h>
 #include <project/net_settings.h>
 #include <zone.h>
+
+#include <vector>
 
 
 struct ALTIUM_PCB_IMPORT_FIXTURE
 {
-    ALTIUM_PCB_IMPORT_FIXTURE() {}
+    ALTIUM_PCB_IMPORT_FIXTURE() = default;
 
     PCB_IO_ALTIUM_DESIGNER m_altiumPlugin;
 };
@@ -277,6 +281,137 @@ BOOST_AUTO_TEST_CASE( SelectAltiumPolygonRule_PriorityOrder )
     BOOST_CHECK( selectAltiumPolygonRule( rules ) == nullptr );
 
     BOOST_CHECK( selectAltiumPolygonRule( {} ) == nullptr );
+}
+
+
+/**
+ * Regression test for https://gitlab.com/kicad/code/kicad/-/issues/24458
+ *
+ * The Fastino board references every via's solder mask expansion from the hole edge.  KiCad vias
+ * cannot represent a hole-referenced opening, so when the resulting opening does not clear the via
+ * land the importer must tent the side instead of leaving the copper exposed.  Before the fix these
+ * vias were imported untented, so verify the imported board tents both sides of every via.
+ *
+ * This is the same board used by the issue 24456 stackup test.
+ */
+BOOST_AUTO_TEST_CASE( Via_HoleReferencedMaskTenting )
+{
+    std::string dataPath = KI_TEST::GetPcbnewTestDataDir()
+                           + "plugins/altium/issue24456/Fastino_Ground_Isolator.PcbDoc";
+
+    std::unique_ptr<BOARD> board = std::make_unique<BOARD>();
+
+    m_altiumPlugin.LoadBoard( dataPath, board.get(), nullptr );
+
+    BOOST_REQUIRE( board );
+
+    int viaCount = 0;
+    int frontExposed = 0;
+    int backExposed = 0;
+
+    for( PCB_TRACK* track : board->Tracks() )
+    {
+        if( track->Type() != PCB_VIA_T )
+            continue;
+
+        const PCB_VIA* via = static_cast<const PCB_VIA*>( track );
+        viaCount++;
+
+        if( via->GetFrontTentingMode() != TENTING_MODE::TENTED )
+            frontExposed++;
+
+        if( via->GetBackTentingMode() != TENTING_MODE::TENTED )
+            backExposed++;
+    }
+
+    BOOST_REQUIRE_GT( viaCount, 0 );
+
+    // Every via on this board carries a hole-referenced mask opening narrower than its land, so the
+    // importer must tent both sides of all of them.
+    BOOST_CHECK_MESSAGE( frontExposed == 0,
+                         wxString::Format( "%d of %d vias left front-exposed despite a "
+                                           "hole-referenced mask",
+                                           frontExposed, viaCount ) );
+    BOOST_CHECK_MESSAGE( backExposed == 0,
+                         wxString::Format( "%d of %d vias left back-exposed despite a "
+                                           "hole-referenced mask",
+                                           backExposed, viaCount ) );
+
+    // Guard the tenting heuristic's boundary cases directly.  A wide hole-referenced opening that
+    // clears the land must NOT tent, a land-referenced via must NOT be silently tented, and an
+    // explicit Altium tent flag must always tent regardless of expansion mode.
+    const uint32_t holeSize = 300000;     // 0.3mm
+    const int      landWidth = 600000;    // 0.6mm
+
+    BOOST_CHECK( !altiumViaSideIsTented( /*tentFlag*/ false, /*manual*/ true, /*fromHole*/ true,
+                                         holeSize, /*expansion*/ 500000, landWidth ) );
+    BOOST_CHECK( !altiumViaSideIsTented( /*tentFlag*/ false, /*manual*/ true, /*fromHole*/ false,
+                                         holeSize, /*expansion*/ 30000, landWidth ) );
+    BOOST_CHECK( altiumViaSideIsTented( /*tentFlag*/ true, /*manual*/ false, /*fromHole*/ false,
+                                        holeSize, /*expansion*/ 0, landWidth ) );
+
+    // A narrow hole-referenced opening (hole + 2 * expansion <= land) tents the side.
+    BOOST_CHECK( altiumViaSideIsTented( /*tentFlag*/ false, /*manual*/ true, /*fromHole*/ true,
+                                        holeSize, /*expansion*/ 30000, landWidth ) );
+}
+
+
+/**
+ * Verify that the dielectric loss tangent is imported from the modern Altium physical stackup
+ * (LAYER_V8_/V9_STACK_LAYER keys). The legacy LAYER<n> records used to build the stackup do not
+ * carry the loss tangent, so it must be backfilled from the modern keys.
+ *
+ * Regression test for https://gitlab.com/kicad/code/kicad/-/issues/24456
+ */
+BOOST_AUTO_TEST_CASE( StackupDielectricLossTangent )
+{
+    std::string dataPath = KI_TEST::GetPcbnewTestDataDir()
+                           + "plugins/altium/issue24456/Fastino_Ground_Isolator.PcbDoc";
+
+    std::unique_ptr<BOARD> board = std::make_unique<BOARD>();
+
+    m_altiumPlugin.LoadBoard( dataPath, board.get(), nullptr );
+
+    BOOST_REQUIRE( board );
+
+    const BOARD_STACKUP& stackup = board->GetDesignSettings().GetStackupDescriptor();
+
+    int dielectricCount = 0;
+    int dielectricWithTangent = 0;
+
+    for( const BOARD_STACKUP_ITEM* item : stackup.GetList() )
+    {
+        if( item->GetType() != BS_ITEM_TYPE_DIELECTRIC )
+            continue;
+
+        for( int sub = 0; sub < item->GetSublayersCount(); sub++ )
+        {
+            // Only count dielectric sublayers that carry a real dielectric (non-zero thickness)
+            if( item->GetThickness( sub ) <= 0 )
+                continue;
+
+            dielectricCount++;
+
+            double tangent = item->GetLossTangent( sub );
+
+            if( tangent > 0. )
+            {
+                dielectricWithTangent++;
+
+                // Every prepreg/core dielectric in this board uses a 0.020 loss tangent.
+                BOOST_CHECK_CLOSE( tangent, 0.020, 1e-6 );
+            }
+        }
+    }
+
+    BOOST_REQUIRE_GT( dielectricCount, 0 );
+
+    // All of the board's substantive dielectrics carry a loss tangent in the Altium source, so
+    // every imported dielectric sublayer must receive it.
+    BOOST_CHECK_MESSAGE( dielectricWithTangent == dielectricCount,
+                         wxString::Format( "Only %d of %d dielectric sublayers received a loss "
+                                           "tangent from the Altium stackup",
+                                           dielectricWithTangent, dielectricCount ) );
 }
 
 
