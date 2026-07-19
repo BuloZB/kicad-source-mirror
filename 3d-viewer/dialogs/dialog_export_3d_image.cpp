@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/gpl-3.0.html
- * or you may search the http://www.gnu.org website for the version 3 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "dialog_export_3d_image.h"
@@ -47,6 +43,10 @@ DIALOG_EXPORT_3D_IMAGE::DIALOG_EXPORT_3D_IMAGE( wxWindow* aParent, const wxSize&
                                 : RESOLUTION_UNITS::PIXELS_PER_INCH )
 {
     m_aspectRatio = static_cast<double>(m_width) / static_cast<double>(m_height);
+
+    // State is persisted through EXPORT_IMAGE_SETTINGS, so opt out of the generic
+    // control-state save and restore.
+    OptOut( this );
 
     wxBoxSizer* mainSizer = new wxBoxSizer( wxVERTICAL );
 
@@ -154,24 +154,6 @@ DIALOG_EXPORT_3D_IMAGE::DIALOG_EXPORT_3D_IMAGE( wxWindow* aParent, const wxSize&
     m_spinYResolution->Bind( wxEVT_SPINCTRLDOUBLE, &DIALOG_EXPORT_3D_IMAGE::OnYResolutionChange, this );
     m_choiceSizeUnits->Bind( wxEVT_CHOICE, &DIALOG_EXPORT_3D_IMAGE::OnSizeUnitChange, this );
     m_choiceResolutionUnits->Bind( wxEVT_CHOICE, &DIALOG_EXPORT_3D_IMAGE::OnResolutionUnitChange, this );
-}
-
-
-bool DIALOG_EXPORT_3D_IMAGE::TransferDataToWindow()
-{
-    m_spinWidth->SetValue( m_width );
-    m_spinHeight->SetValue( m_height );
-    m_spinXResolution->SetValue( m_xResolution );
-    m_spinYResolution->SetValue( m_yResolution );
-
-    m_choiceSizeUnits->SetSelection( static_cast<int>( m_sizeUnits ) );
-    m_choiceResolutionUnits->SetSelection( static_cast<int>( m_resolutionUnits ) );
-
-    m_lockButton->SetBitmap( KiBitmapBundle( m_lockAspectRatio ? BITMAPS::locked : BITMAPS::unlocked ) );
-
-    UpdateAspectRatio();
-    UpdatePixelSize();
-    return true;
 }
 
 

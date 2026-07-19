@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <io/altium/altium_project_variants.h>
@@ -126,6 +122,49 @@ static ALTIUM_VARIANT_ENTRY ParseVariationString( const wxString& aValue )
     }
 
     return entry;
+}
+
+
+std::map<wxString, wxString> ParseAltiumProjectParameters( const wxString& aPrjPcbPath )
+{
+    std::map<wxString, wxString> parameters;
+
+    wxFileConfig config( wxEmptyString, wxEmptyString, wxEmptyString, aPrjPcbPath,
+                         wxCONFIG_USE_NO_ESCAPE_CHARACTERS );
+
+    wxString groupname;
+    long     groupid;
+
+    for( bool more = config.GetFirstGroup( groupname, groupid ); more;
+         more = config.GetNextGroup( groupname, groupid ) )
+    {
+        if( !groupname.StartsWith( wxS( "Parameter" ) ) )
+            continue;
+
+        // Only numbered [ParameterN] sections hold the project parameters; reject look-alikes
+        // such as [ParameterEngine] by requiring a trailing integer.
+        wxString numStr = groupname.Mid( 9 );
+        long     num;
+
+        if( !numStr.ToLong( &num ) )
+            continue;
+
+        wxString name = config.Read( groupname + wxS( "/Name" ), wxEmptyString );
+
+        if( name.empty() )
+            continue;
+
+        wxString value = config.Read( groupname + wxS( "/Value" ), wxEmptyString );
+
+        // KiCad variable references are matched case-insensitively by resolving to upper case,
+        // which is what AltiumPcbSpecialStringsToKiCadStrings emits, so key on the upper-cased
+        // name to keep ${PCB_REVISION} and friends resolvable.
+        name.UpperCase();
+
+        parameters[name] = value;
+    }
+
+    return parameters;
 }
 
 

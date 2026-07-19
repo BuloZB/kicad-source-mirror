@@ -14,8 +14,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <api/api_plugin.h>
@@ -75,7 +75,6 @@ void PLUGINS_GRID_TRICKS::showPopupMenu( wxMenu& menu, wxGridEvent& aEvent )
         m_grid->ClearSelection();
         m_grid->SelectRow( clickedRow );
 
-#ifdef KICAD_IPC_API
         API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
         wxString id = m_grid->GetCellValue( clickedRow,
                                             PANEL_PCBNEW_ACTION_PLUGINS::COLUMN_SETTINGS_IDENTIFIER );
@@ -86,7 +85,6 @@ void PLUGINS_GRID_TRICKS::showPopupMenu( wxMenu& menu, wxGridEvent& aEvent )
             menu.Append( MYID_RECREATE_ENV, _( "Recreate Plugin Environment" ), _( "Recreate Plugin Environment" ) );
             menu.AppendSeparator();
         }
-#endif
     }
 
     GRID_TRICKS::showPopupMenu( menu, aEvent );
@@ -97,7 +95,6 @@ void PLUGINS_GRID_TRICKS::doPopupSelection( wxCommandEvent& event )
 {
     if( event.GetId() == MYID_RECREATE_ENV )
     {
-#ifdef KICAD_IPC_API
         API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
         wxString id = m_grid->GetCellValue( m_grid->GetGridCursorRow(),
                                             PANEL_PCBNEW_ACTION_PLUGINS::COLUMN_SETTINGS_IDENTIFIER );
@@ -107,7 +104,6 @@ void PLUGINS_GRID_TRICKS::doPopupSelection( wxCommandEvent& event )
         {
             mgr.RecreatePluginEnvironment( ( *action )->plugin.Identifier() );
         }
-#endif
     }
     else
     {
@@ -229,7 +225,6 @@ bool PANEL_PCBNEW_ACTION_PLUGINS::TransferDataFromWindow()
     PCBNEW_SETTINGS* settings = dynamic_cast<PCBNEW_SETTINGS*>( Kiface().KifaceSettings() );
     wxASSERT( settings );
 
-#ifdef KICAD_IPC_API
     API_PLUGIN_MANAGER& mgr = Pgm().GetPluginManager();
 
     if( settings )
@@ -247,7 +242,6 @@ bool PANEL_PCBNEW_ACTION_PLUGINS::TransferDataFromWindow()
             }
         }
     }
-#endif
 
     return true;
 }
@@ -267,7 +261,6 @@ bool PANEL_PCBNEW_ACTION_PLUGINS::TransferDataToWindow()
 
     for( size_t row = 0; row < orderedPlugins.size(); row++ )
     {
-#ifdef KICAD_IPC_API
             const PLUGIN_ACTION* action = orderedPlugins[row];
 
             const wxBitmapBundle& icon = KIPLATFORM::UI::IsDarkTheme() && action->icon_dark.IsOk() ? action->icon_dark
@@ -289,7 +282,6 @@ bool PANEL_PCBNEW_ACTION_PLUGINS::TransferDataToWindow()
 
             m_grid->SetCellValue( row, COLUMN_PLUGIN_NAME, action->plugin.Name() );
             m_grid->SetCellValue( row, COLUMN_DESCRIPTION, action->description );
-#endif
     }
 
     const int colMaxWidth = FromDIP( 400 );

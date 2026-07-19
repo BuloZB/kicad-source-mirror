@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -37,6 +33,7 @@
 #include <wx/wfstream.h>
 #include <wx/file.h>
 #include <wx/filename.h>
+#include <wx/log.h>
 
 
 PCB_IO_DIPTRACE::PCB_IO_DIPTRACE() : PCB_IO( wxS( "DipTrace" ) )
@@ -115,6 +112,10 @@ BOARD* PCB_IO_DIPTRACE::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe
 
             if( drcFile.IsOpened() )
                 drcFile.Write( rules );
+            else
+                wxLogWarning( _( "DipTrace import: could not write design rules to '%s'; "
+                                 "imported board is missing DipTrace-specific clearance rules." ),
+                              drcPath.GetFullPath() );
         }
     }
 

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <sch_io/diptrace/sch_io_diptrace.h>
@@ -29,9 +25,11 @@
 #include <wx/ffile.h>
 #include <wx/filename.h>
 
+#include <project.h>
 #include <reporter.h>
 #include <progress_reporter.h>
 #include <sch_sheet.h>
+#include <sch_sheet_path.h>
 #include <sch_screen.h>
 #include <schematic.h>
 #include <wildcards_and_files_ext.h>
@@ -112,10 +110,28 @@ SCH_SHEET* SCH_IO_DIPTRACE::LoadSchematicFile( const wxString& aFileName,
                                  m_progressReporter, m_reporter );
     parser.Parse();
 
-    // The parser appends sub-sheets to the root screen after SetTopLevelSheets() built the
-    // hierarchy, so rebuild it now to expose every sheet to headless and CLI consumers that
-    // do not run the editor's post-import refresh.
+    // The parser creates the final top-level sheet set after installing the initial content root,
+    // so rebuild now for headless and CLI consumers that do not run the editor's post-import refresh.
     aSchematic->RefreshHierarchy();
+
+    // The editor's foreign-import path, unlike the native loader, does not generate per-sheet
+    // symbol and sheet instance data. Without it, symbols on sub-sheets keep only the transient
+    // root-path instance from construction, so their references, unit selections and page numbers
+    // do not resolve on the sheet they actually live on. Generate it here from the real hierarchy.
+    if( !aAppendToMe )
+    {
+        wxString projectName = aSchematic->Project().GetProjectName();
+
+        if( projectName.IsEmpty() )
+            projectName = wxFileName( aFileName ).GetName();
+
+        SCH_SHEET_LIST sheets = aSchematic->BuildUnorderedSheetList();
+        sheets.AddNewSymbolInstances( SCH_SHEET_PATH(), projectName );
+        sheets.AddNewSheetInstances( SCH_SHEET_PATH(), 0 );
+
+        if( sheets.AllSheetPageNumbersEmpty() )
+            sheets.SetInitialPageNumbers();
+    }
 
     return rootSheet;
 }

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <qa_utils/wx_utils/unit_test_utils.h>
@@ -1072,6 +1068,70 @@ BOOST_AUTO_TEST_CASE( Run_Series_Schematic_Ngspice, * boost::unit_test::disabled
     BOOST_TEST_INFO( "Two-port Series .op current = " << iDevice );
     BOOST_TEST( iDevice > 0.0 );
     BOOST_TEST( iDevice < 2.0 );
+}
+
+
+// Regression test for https://gitlab.com/kicad/code/kicad/-/issues/23583
+// A rectangular-wave driver on a model with exactly two waveform pairs (the
+// common case, e.g. the bundled IBIS demo) used to emit the spurious warning
+// "Model has more than 2 waveform pairs, using the first two."  The warning
+// fired because the default accuracy is LEVEL_2 and the emission condition
+// OR-ed in "accuracy <= LEVEL_2", so it triggered even when nothing was
+// discarded.  Any simulation warning pops a modal dialog on every run, so the
+// user saw an error message each time the simulation started.
+BOOST_AUTO_TEST_CASE( RectangularDriver_TwoWaveformPairs_NoSpuriousWarning )
+{
+    WX_STRING_REPORTER reporter;
+
+    std::string path = GetLibraryPath( "ibis_v5_1" );
+    KIBIS       top( path, &reporter );
+
+    BOOST_REQUIRE( top.m_valid );
+
+    KIBIS_COMPONENT* comp = top.GetComponent( "Virtual" );
+    BOOST_REQUIRE( comp != nullptr );
+
+    // Pin B1 maps to model AC40, an OUTPUT driver with two waveform pairs.
+    KIBIS_PIN*   pin = comp->GetPin( "B1" );
+    KIBIS_MODEL* model = top.GetModel( "AC40" );
+    BOOST_REQUIRE( pin != nullptr );
+    BOOST_REQUIRE( model != nullptr );
+
+    // The whole point of the bug is that exactly two pairs are present, so
+    // nothing is being discarded and no warning is warranted.
+    BOOST_TEST( model->waveformPairs().size() == 2 );
+
+    KIBIS_WAVEFORM_RECTANGULAR* waveform = new KIBIS_WAVEFORM_RECTANGULAR( top );
+    waveform->m_ton = 20e-9;
+    waveform->m_toff = 50e-9;
+    waveform->m_delay = 10e-9;
+    waveform->m_cycles = 1;
+
+    KIBIS_PARAMETER kparams;
+    kparams.m_waveform = waveform;
+
+    std::string result;
+
+    // writeSpiceDriver emits the waveform-pair warning before delegating to the
+    // two-waveform Ku/Kd extraction, which spins up ngspice.  ngspice has no
+    // settings object in the QA harness, so that step throws a wxASSERT.  The
+    // warning we are checking for is already in the reporter by then, so swallow
+    // only that assertion and inspect what was reported up to that point.  Any
+    // other exception is unexpected and must fail the test.
+    try
+    {
+        pin->writeSpiceDriver( result, "DRIVER", *model, kparams );
+    }
+    catch( const KI_TEST::WX_ASSERT_ERROR& )
+    {
+    }
+
+    BOOST_TEST_INFO( "Reported: " << reporter.GetMessages() );
+
+    // The discard warning must not appear when exactly two pairs are present.
+    BOOST_TEST( reporter.GetMessages().Find( wxS( "more than 2 waveform pairs" ) ) == wxNOT_FOUND );
+
+    delete waveform;
 }
 
 

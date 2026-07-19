@@ -15,11 +15,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef ALTIUM_PARSER_PCB_H
@@ -708,6 +704,7 @@ struct AARC6
     uint16_t     polygon;
     uint16_t     subpolyindex;
     uint8_t      keepoutrestrictions;
+    uint32_t     unionindex = 0;
 
     VECTOR2I center;
     uint32_t radius;
@@ -872,12 +869,32 @@ struct ATRACK6
     uint16_t     polygon;
     uint16_t     subpolyindex;
     uint8_t      keepoutrestrictions;
+    uint32_t     unionindex = 0;
 
     VECTOR2I start;
     VECTOR2I end;
     uint32_t width;
 
     explicit ATRACK6( ALTIUM_BINARY_PARSER& aReader );
+};
+
+// Interactive length-tuning meander, stored in the SmartUnions stream and referenced by
+// copper primitives through their union index.  Altium commits the tuned copper as ordinary
+// tracks and arcs, keeping the parametric meander definition here.
+struct ASMARTUNION6
+{
+    int      unionindex = 0;
+    bool     is_tuning = false;
+    bool     is_diffpair = false;
+
+    int      style = 0;
+    int32_t  gap = 0;
+    int32_t  amplitude = 0;
+    int32_t  minamplitude = 0;
+    double   mitterradiusratio = 0.0;
+    bool     singleside = false;
+
+    explicit ASMARTUNION6( ALTIUM_BINARY_PARSER& aReader );
 };
 
 struct ATEXT6

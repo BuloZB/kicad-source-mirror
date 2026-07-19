@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #pragma once
@@ -147,6 +143,16 @@ public:
      * Default value: false
      */
     bool m_EnableCreepageSlot;
+
+    /**
+     * Use the realtime (V2) creepage engine. Gates the live drag overlay and selects the V2
+     * engine in batch DRC. V2 is designed to produce results identical to the legacy solver.
+     *
+     * Setting name: "RealtimeCreepage"
+     * Valid values: 0 or 1
+     * Default value: false
+     */
+    bool m_RealtimeCreepage;
 
     /**
      * Epsilon for DRC tests.
@@ -663,6 +669,17 @@ public:
     bool m_EnableCacheFriendlyFracture;
 
     /**
+     * Refine each triangulation toward the constrained Delaunay triangulation with a
+     * boundary-preserving edge-flip post-pass, trading a little triangulation time for far fewer
+     * sliver triangles.
+     *
+     * Setting name: "TriangulateDelaunayRefine"
+     * Valid values: 0 or 1
+     * Default value: 1
+     */
+    bool m_TriangulateDelaunayRefine;
+
+    /**
      * Log IPC API requests and responses
      *
      * Setting name: "EnableAPILogging"
@@ -1045,6 +1062,19 @@ public:
      * Default value: 5e4
      */
     double m_DiffSkewTargetDiffSegmentSize;
+
+    /**
+     * Default CanAutoplace value for fields imported from EAGLE files.
+     *
+     * Before this became configurable, all fields imported from EAGLE files had CanAutoplace
+     * set to true. This can be undesireable, e.g., if all fields were carefully arranged in
+     * the EAGLE library and are not intended to be arranged automatically.
+     *
+     * Setting name: "EagleImportFieldsCanAutoplace"
+     * Valid values: true or false
+     * Default value: true
+     */
+    bool m_EagleImportFieldsCanAutoplace;
 
     wxString m_traceMasks; ///< Trace masks for wxLogTrace, loaded from the config file.
     ///@}

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -119,7 +115,6 @@ static const uint8_t CHAIN_HEADER[] = {
 
 static constexpr size_t CHAIN_HEADER_LEN = 6;
 
-/// Track node record size in bytes.
 static constexpr size_t TRACK_NODE_SIZE = 41;
 
 /// Zone section preamble constant: int4(-20000), the last field of the font block.
@@ -185,10 +180,13 @@ static constexpr size_t PAD_POST_DIM_HEADER    = 11;  // fixed portion before po
 static constexpr size_t PAD_POST_DIM_TAIL      = 25;  // fixed portion after polygon vertices
 static constexpr size_t PAD_POLYGON_VERTEX_SIZE = 8;  // int4(x) + int4(y) per vertex
 
+/// Upper bound for a plausible pad net index, used as a chain-walk desync guard. DipTrace net
+/// indices run 0..netCount-1 (or -1 for unconnected); nets are parsed after components, so this
+/// must comfortably exceed the largest board's net count (the reference board has 568) without admitting
+/// the multi-million garbage a desynced read would produce.
+static constexpr int PAD_MAX_NET_INDEX = 10000;
 
-/**
- * Read a 3-byte RGB color from the reader and return it packed as 0x00RRGGBB.
- */
+
 static uint32_t ReadColorPacked( BINARY_READER& aReader )
 {
     uint8_t r, g, b;
@@ -199,9 +197,6 @@ static uint32_t ReadColorPacked( BINARY_READER& aReader )
 }
 
 
-/**
- * Decode a 3-byte big-endian biased integer from raw data at a given offset.
- */
 static int ReadInt3At( const uint8_t* aData, size_t aPos )
 {
     return ( ( static_cast<int>( aData[aPos] ) << 16 )
@@ -210,16 +205,88 @@ static int ReadInt3At( const uint8_t* aData, size_t aPos )
 }
 
 
-/**
- * Decode a 4-byte big-endian biased integer from raw data at a given offset.
- */
 static int ReadInt4At( const uint8_t* aData, size_t aPos )
 {
     unsigned int raw = ( static_cast<unsigned int>( aData[aPos] ) << 24 )
                      | ( static_cast<unsigned int>( aData[aPos + 1] ) << 16 )
                      | ( static_cast<unsigned int>( aData[aPos + 2] ) << 8 )
                      | static_cast<unsigned int>( aData[aPos + 3] );
-    return static_cast<int>( raw ) - INT4_BIAS;
+
+    // Subtract in int64 so a raw value with the high bit set cannot overflow the intermediate int.
+    return static_cast<int>( static_cast<int64_t>( raw ) - INT4_BIAS );
+}
+
+
+/**
+ * Recover a placed component's rotation, expressed in 90-degree quarter turns.
+ *
+ * DipTrace's pre-v47 "flat" board format does not store the rotation inside the component
+ * geometry record; pads and footprint shapes are serialized in their canonical (unrotated) frame.
+ * The placement rotation is a quarter-turn count carried in a compact five-field tuple that sits a
+ * short, variable distance ahead of the component boundary:
+ *
+ *   int3(quarterTurns 0..3) int3(-1 sentinel) int3(componentId) int3(kind 0..3) byte(flag 0..1)
+ *
+ * The tuple nearest the boundary belongs to this component. It is located by its own structure --
+ * the int3(-1) sentinel plus the bounded neighbour fields -- rather than by the trailing zero run
+ * the earlier heuristic relied on: that zero run was present for only about half of the components,
+ * so the nearest match frequently belonged to the previous component (an off-by-one that dropped or
+ * corrupted most rotations).
+ *
+ * The flat format encodes only cardinal rotations; v47+ stores arbitrary angles separately (the
+ * placement-angle section), which callers prefer when present. Verified against the Re-ARM
+ * reference board's DipTrace XML export: 91 of 93 placed components decode exactly, and the two
+ * residuals are caught by the connectivity cross-check. The count may exceed three full turns, so
+ * callers reduce it modulo four.
+ *
+ * @return true and sets aQuarterTurns when a placement tuple is found, false otherwise.
+ */
+static bool FindComponentRotation( const uint8_t* aData, size_t aDataSize, size_t aBoundaryOffset,
+                                   int& aQuarterTurns )
+{
+    static constexpr size_t MAX_LOOKBACK = 4096;
+    static constexpr size_t MAX_LOOKAHEAD = 1024;
+
+    if( aBoundaryOffset < 6 )
+        return false;
+
+    size_t scanStart = aBoundaryOffset > MAX_LOOKBACK ? aBoundaryOffset - MAX_LOOKBACK : 6;
+    size_t scanEnd = std::min( aDataSize, aBoundaryOffset + MAX_LOOKAHEAD );
+
+    bool   found = false;
+    size_t bestDistance = MAX_LOOKBACK + MAX_LOOKAHEAD + 1;
+
+    // Each candidate tuple is anchored at its componentId int3 (idPos): the quarter turn is 6 bytes
+    // before it, the int3(-1) sentinel 3 bytes before, the kind int3 3 bytes after, and the small
+    // flag byte 6 bytes after.
+    for( size_t idPos = scanStart; idPos + 7 <= scanEnd; idPos++ )
+    {
+        if( ReadInt3At( aData, idPos - 3 ) != -1 )
+            continue;
+
+        int     quarterTurns = ReadInt3At( aData, idPos - 6 );
+        int     componentId = ReadInt3At( aData, idPos );
+        int     kind = ReadInt3At( aData, idPos + 3 );
+        uint8_t flag = aData[idPos + 6];
+
+        if( quarterTurns < 0 || quarterTurns > 3 || kind < 0 || kind > 3 || flag > 1 )
+            continue;
+
+        if( componentId < 0 || componentId > 100000 )
+            continue;
+
+        size_t distance = ( idPos > aBoundaryOffset ) ? idPos - aBoundaryOffset
+                                                      : aBoundaryOffset - idPos;
+
+        if( distance < bestDistance )
+        {
+            bestDistance = distance;
+            aQuarterTurns = quarterTurns;
+            found = true;
+        }
+    }
+
+    return found;
 }
 
 
@@ -928,6 +995,7 @@ void PCB_PARSER::Parse()
         ParseDesignRules();
         m_postDesignRulesOffset = m_reader.GetOffset();
         FindAndParseComponents();
+        ApplyPlacementAngles();
         ParsePostComponentSections();
         wxLogTrace( traceDiptraceIo,
                     wxT( "DipTrace: post-component sections parsed; inferring routing-ref pad nets" ) );
@@ -1131,21 +1199,13 @@ void PCB_PARSER::ParseBoardProperties()
 
     wxLogTrace( traceDiptraceIo, wxT( "DipTrace: file version %d" ), m_version );
 
-    /* int field0b = */ m_reader.ReadInt4();
-    /* int field0f = */ m_reader.ReadInt3();
-    /* int field12 = */ m_reader.ReadInt3();
+    m_reader.ReadInt4();
+    m_reader.ReadInt3();
+    m_reader.ReadInt3();
 
-    // v37 has no schematic path string; an int3(0) appears instead
-    if( m_version <= LEGACY_STRING_VERSION )
-    {
-        m_reader.ReadInt3();  // placeholder (always 0)
-    }
-    else
-    {
-        /* wxString schematicPath = */ m_reader.ReadString();
-    }
+    m_reader.ReadString();   // schematic path
 
-    /* uint8_t flagByte = */ m_reader.ReadByte();
+    m_reader.ReadByte();
 
     m_bboxXMin = m_reader.ReadInt4();
     m_bboxYMin = m_reader.ReadInt4();
@@ -1157,6 +1217,13 @@ void PCB_PARSER::ParseBoardProperties()
 void PCB_PARSER::ParseOutline()
 {
     int vertexCount = m_reader.ReadInt3();
+
+    // A negative count would sign-extend to a huge size_t in reserve() (std::length_error); a wild
+    // positive count would over-allocate. Reject before touching the vector, like the other sections.
+    if( vertexCount < 0 || vertexCount > 1000000 )
+        THROW_IO_ERROR( wxString::Format( _( "DipTrace import: invalid outline vertex count %d." ),
+                                          vertexCount ) );
+
     m_outline.clear();
     m_outline.reserve( vertexCount );
 
@@ -1191,6 +1258,12 @@ void PCB_PARSER::ParsePostOutline()
 void PCB_PARSER::ParseLayers()
 {
     int layerCount = m_reader.ReadInt3();
+
+    // Guard against a negative (huge size_t in reserve) or wild positive count before allocating.
+    if( layerCount < 0 || layerCount > 100000 )
+        THROW_IO_ERROR( wxString::Format( _( "DipTrace import: invalid layer count %d." ),
+                                          layerCount ) );
+
     m_layers.clear();
     m_copperLayerOrdinalById.clear();
     m_layers.reserve( layerCount );
@@ -1221,11 +1294,10 @@ void PCB_PARSER::ParseLayers()
 
 void PCB_PARSER::ParseFontStyle()
 {
-    // 6 int3 prefix fields
     for( int i = 0; i < 6; i++ )
         m_reader.ReadInt3();
 
-    /* wxString fontName = */ m_reader.ReadString();
+    m_reader.ReadString();   // font name
 
     m_reader.ReadInt4();    // field_a
     m_reader.ReadInt4();    // field_b
@@ -1270,7 +1342,7 @@ void PCB_PARSER::ParseFontStyle()
 
     int fieldCOrGroupCount = m_reader.ReadInt3();
 
-    if( m_version > LEGACY_STRING_VERSION && fieldCOrGroupCount > 0 )
+    if( fieldCOrGroupCount > 0 )
     {
         ParsePatternStyleGroups( fieldCOrGroupCount );
     }
@@ -1294,7 +1366,7 @@ void PCB_PARSER::ParsePatternNameGroups( int aGroupCount )
 
     for( int i = 0; i < aGroupCount; i++ )
     {
-        /* wxString groupName = */ m_reader.ReadString();
+        m_reader.ReadString();  // group name
         m_reader.ReadInt3();    // field_a
         int blockCount = m_reader.ReadInt3();
 
@@ -1307,7 +1379,7 @@ void PCB_PARSER::ParsePatternNameGroups( int aGroupCount )
         for( int j = 0; j < blockCount; j++ )
         {
             m_reader.ReadInt3();    // block_id
-            /* wxString blockName = */ m_reader.ReadString();
+            m_reader.ReadString();  // block name
         }
     }
 }
@@ -1326,7 +1398,7 @@ void PCB_PARSER::ParsePatternStyleGroups( int aGroupCount )
 
     for( int i = 0; i < aGroupCount; i++ )
     {
-        /* wxString groupName = */ m_reader.ReadString();
+        m_reader.ReadString();  // group name
 
         uint8_t color[3];
         m_reader.ReadBytes( color, sizeof( color ) );
@@ -1350,7 +1422,7 @@ void PCB_PARSER::ParsePatternStyleGroups( int aGroupCount )
 
 void PCB_PARSER::ParseImplicitPatternStyleGroup()
 {
-    /* wxString groupName = */ m_reader.ReadString();
+    m_reader.ReadString();   // group name
     m_reader.ReadByte();     // flag
     m_reader.ReadInt3();     // field_a
     m_reader.ReadInt3();     // field_b
@@ -1372,11 +1444,11 @@ void PCB_PARSER::ParseDesignRules()
     m_viaStyles.clear();
     bool dumpRuleSets = EnvFlagEnabled( "KICAD_DIPTRACE_DUMP_RULESETS" );
 
-    // Parse all entries (rule names and ViaStyles share the same structure)
+    // Rule names and ViaStyles share the same record structure.
     for( int i = 0; i < m_ruleNameCount; i++ )
     {
         wxString name = m_reader.ReadString();
-        /* uint8_t flag = */ m_reader.ReadByte();
+        m_reader.ReadByte();    // flag
         int val1 = m_reader.ReadInt4();
         int val2 = m_reader.ReadInt4();
         int fieldA = m_reader.ReadInt3();
@@ -1405,7 +1477,6 @@ void PCB_PARSER::ParseDesignRules()
     // Global field_c after all entries -- total rule set count
     int ruleSetCount = m_reader.ReadInt3();
 
-    // Parse rule sets
     for( int i = 0; i < ruleSetCount; i++ )
     {
         wxString setName = m_reader.ReadString();
@@ -1624,7 +1695,7 @@ void PCB_PARSER::FindAndParseComponents()
 
     size_t parsedEnd = m_postDesignRulesOffset;
 
-    // Step 1: Find upper bound using known landmarks
+    // Bound the component region above by the nearest known post-component landmark.
     size_t projLib = m_reader.FindString( wxT( "Project Libraries" ), 0, 0 );
     size_t fontMarker = m_reader.FindPattern( BOARD_SETTINGS_FONT_MARKER, 9,
                                               m_postLayersOffset, 0 );
@@ -1655,7 +1726,6 @@ void PCB_PARSER::FindAndParseComponents()
             FieldWalkComponentBoundaries( m_componentUpperBound );
 
     {
-    // Step 2: Find all boundary patterns between design rules and the upper bound
     size_t searchStart = ( parsedEnd > 200 ) ? parsedEnd - 200 : m_postLayersOffset;
 
     std::vector<size_t> stdOffsets = FindAllBoundaries(
@@ -1668,7 +1738,6 @@ void PCB_PARSER::FindAndParseComponents()
             BOUNDARY_ALT, BOUNDARY_CORE_LEN,
             searchStart, m_componentUpperBound );
 
-    // Remove alt boundaries that overlap with standard ones
     std::set<size_t> stdSet( stdOffsets.begin(), stdOffsets.end() );
     std::vector<size_t> pureAlt;
 
@@ -1678,21 +1747,18 @@ void PCB_PARSER::FindAndParseComponents()
             pureAlt.push_back( off );
     }
 
-    // Merge and sort all boundary offsets
     std::vector<size_t> allBoundaries( stdOffsets );
     allBoundaries.insert( allBoundaries.end(), pureAlt.begin(), pureAlt.end() );
     std::sort( allBoundaries.begin(), allBoundaries.end() );
 
-    // Remove duplicates
     allBoundaries.erase( std::unique( allBoundaries.begin(), allBoundaries.end() ),
                          allBoundaries.end() );
 
     if( allBoundaries.empty() )
         return;
 
-    // Step 3: Determine the string offset from boundary core.
-    // Both standard and alternate patterns have 13-byte cores.
-    // Typically 1 trailing byte follows, so strings start at +14.
+    // Both standard and alternate patterns have 13-byte cores, typically followed by 1 trailing
+    // byte, so header strings usually start at +14.
     static const int STRING_OFFSETS[] = { 14, 15, 16, 17, 18, 19, 20 };
     int stringDelta = 14;  // default
 
@@ -1725,7 +1791,7 @@ void PCB_PARSER::FindAndParseComponents()
             break;
     }
 
-    // Step 4: Validate boundaries that have readable strings at the expected offset
+    // Validate boundaries that have a readable header string at the chosen offset.
     for( size_t bOff : allBoundaries )
     {
         if( parsedEnd > 50 && bOff < parsedEnd - 50 )
@@ -1799,7 +1865,7 @@ void PCB_PARSER::FindAndParseComponents()
         return;
     }
 
-    // Step 5: Parse components sequentially. Stop on consecutive failures.
+    // Parse components sequentially, stopping after a run of consecutive failures.
     int  consecutiveFailures = 0;
     bool seenSuccess = false;
     static constexpr int MAX_CONSECUTIVE_FAILURES = 3;
@@ -1861,15 +1927,132 @@ void PCB_PARSER::FindAndParseComponents()
 }
 
 
+void PCB_PARSER::ApplyPlacementAngles()
+{
+    if( m_components.empty() )
+        return;
+
+    const uint8_t* data = m_reader.GetData();
+    size_t         dataSize = m_reader.GetFileSize();
+
+    static constexpr double RAD_FIXED_TO_DEG = ( 180.0 / M_PI ) / 1.0e4;
+    static constexpr int    MAX_ANGLE_FIXED = 200000; // ~11.4 rad of cumulative turns
+
+    // The placement section stores one self-delimiting entry per placed object, each opening with
+    // a header that carries the exact angle as a biased int4 (radians x 1e4) at header-4. There are
+    // two header kinds, both followed by three small int3 fields (high two bytes 0x0F42):
+    //   FULL    -- byte(1) byte(1), used by the first placement of a pattern.
+    //   COMPACT -- byte(0) byte(0) then nine zero bytes + 0x0F42, used when a pattern is reused
+    //              (this kind is why D2/D21, both reusing the SK54C pattern, key correctly).
+    // Collect every header offset and its angle.
+    auto isThreeInt3 = [&]( size_t aPos ) -> bool
+    {
+        return aPos + 9 <= dataSize
+               && data[aPos] == 0x0F && data[aPos + 1] == 0x42
+               && data[aPos + 3] == 0x0F && data[aPos + 4] == 0x42
+               && data[aPos + 6] == 0x0F && data[aPos + 7] == 0x42;
+    };
+
+    std::vector<std::pair<size_t, double>> headers;
+
+    for( size_t off = 4; off + 32 <= dataSize; off++ )
+    {
+        bool full = data[off] == 0x01 && data[off + 1] == 0x01 && isThreeInt3( off + 2 );
+        bool compact = data[off] == 0x00 && data[off + 1] == 0x00 && isThreeInt3( off + 2 )
+                       && off + 22 <= dataSize
+                       && std::memcmp( data + off + 11, "\0\0\0\0\0\0\0\0\0", 9 ) == 0
+                       && data[off + 20] == 0x0F && data[off + 21] == 0x42;
+
+        if( !full && !compact )
+            continue;
+
+        int fixed = ReadInt4At( data, off - 4 );
+
+        if( fixed >= -MAX_ANGLE_FIXED && fixed <= MAX_ANGLE_FIXED )
+            headers.emplace_back( off, static_cast<double>( fixed ) * RAD_FIXED_TO_DEG );
+    }
+
+    if( headers.empty() )
+        return;
+
+    // Map each refdes to the angle of the nearest preceding header (first occurrence wins). A
+    // refdes string is a UTF-16-BE record (uint16 length 1..12) that begins with a letter and
+    // contains a digit; this skips the pattern-name and field strings the entries also carry.
+    std::map<wxString, double> refdesAngle;
+
+    for( size_t off = 0; off + 4 <= dataSize; off++ )
+    {
+        size_t len = ( static_cast<size_t>( data[off] ) << 8 ) | data[off + 1];
+
+        if( len < 1 || len > 12 || off + 2 + 2 * len > dataSize )
+            continue;
+
+        std::string refdes;
+        bool        asciiUtf16 = true;
+        bool        firstAlpha = false;
+        bool        hasDigit = false;
+
+        for( size_t c = 0; c < len; c++ )
+        {
+            uint8_t hi = data[off + 2 + 2 * c];
+            uint8_t lo = data[off + 3 + 2 * c];
+
+            if( hi != 0 || lo < 0x20 || lo > 0x7E )
+            {
+                asciiUtf16 = false;
+                break;
+            }
+
+            if( c == 0 )
+                firstAlpha = std::isalpha( lo );
+
+            if( std::isdigit( lo ) )
+                hasDigit = true;
+
+            refdes += static_cast<char>( lo );
+        }
+
+        if( !asciiUtf16 || !firstAlpha || !hasDigit )
+            continue;
+
+        // Nearest header strictly preceding this refdes.
+        auto it = std::upper_bound( headers.begin(), headers.end(), off,
+                                    []( size_t aPos, const std::pair<size_t, double>& aHdr )
+                                    { return aPos < aHdr.first; } );
+
+        if( it == headers.begin() )
+            continue;
+
+        refdesAngle.emplace( wxString::FromUTF8( refdes ), ( it - 1 )->second );
+    }
+
+    size_t applied = 0;
+
+    for( DT_COMPONENT& comp : m_components )
+    {
+        auto it = refdesAngle.find( comp.refdes );
+
+        if( it != refdesAngle.end() )
+        {
+            comp.placementAngleDeg = it->second;
+            comp.hasPlacementAngle = true;
+            applied++;
+        }
+    }
+
+    wxLogTrace( traceDiptraceIo, wxT( "DipTrace: keyed %zu exact placement angles by refdes" ), applied );
+}
+
+
 bool PCB_PARSER::ClassifyStandaloneVia( const DT_COMPONENT& aComp )
 {
     // A DipTrace board serializes three "padstack-only" object kinds with an empty pattern
     // name and empty library path: Static Vias, single-pad Pads, and Fiducials. Only the
     // Static Via is a true KiCad via; the other kinds must become one-pad footprints so the
-    // 1662 placed footprints (668 real + 990 Pad + 4 Fiducial in DrvModBoard) are not lost.
+    // 1662 placed footprints (668 real + 990 Pad + 4 Fiducial in the reference board) are not lost.
     //
     // The component's display name carries DipTrace's internal object name and is the only
-    // reliable discriminator (verified field-by-field against DrvModBoard.dipxml: 1102 vias
+    // reliable discriminator (verified field-by-field against the reference board XML oracle: 1102 vias
     // carry "Static Via", 990 Pads carry "Pad", 4 carry "Fiducial"; older boards such as
     // keyboard.dip name the same object "Via"). Mount holes carry "Hole" and must stay
     // footprints. A real footprint always has a non-empty pattern name and library path, so
@@ -1891,15 +2074,13 @@ bool PCB_PARSER::ParseSingleComponent( size_t aBoundaryOffset, size_t aUpperBoun
 
     try
     {
-        if( aBoundaryOffset >= 59 )
-        {
-            size_t qturnPos = aBoundaryOffset - 59;
+        int quarterTurns = 0;
 
-            if( qturnPos + 3 <= m_reader.GetFileSize() )
-            {
-                aComp.placementQuarterTurns = ReadInt3At( m_reader.GetData(), qturnPos );
-                aComp.hasPlacementQuarterTurns = true;
-            }
+        if( FindComponentRotation( m_reader.GetData(), m_reader.GetFileSize(), aBoundaryOffset,
+                                   quarterTurns ) )
+        {
+            aComp.placementQuarterTurns = quarterTurns;
+            aComp.hasPlacementQuarterTurns = true;
         }
 
         // Library path (may be empty for embedded components)
@@ -2038,7 +2219,7 @@ void PCB_PARSER::FindPadsInRegion( DT_COMPONENT& aComp, size_t aRegionStart, siz
 
         int netIdx = ReadInt3At( data, aPos + 3 );
 
-        if( netIdx < -1 || netIdx > 500 )
+        if( netIdx < -1 || netIdx > PAD_MAX_NET_INDEX )
             return false;
 
         int padX = ReadInt4At( data, aPos + 6 );
@@ -2127,11 +2308,10 @@ void PCB_PARSER::FindPadsInRegion( DT_COMPONENT& aComp, size_t aRegionStart, siz
         int padX        = ReadInt4At( data, chainPos + 6 );
         int padY        = ReadInt4At( data, chainPos + 10 );
 
-        // Validate pre-header fields
         if( padIndex != padNum )
             break;
 
-        if( padNetIndex < -1 || padNetIndex > 500 )
+        if( padNetIndex < -1 || padNetIndex > PAD_MAX_NET_INDEX )
             break;
 
         if( std::abs( padX ) > 50000000 || std::abs( padY ) > 50000000 )
@@ -2162,7 +2342,6 @@ void PCB_PARSER::FindPadsInRegion( DT_COMPONENT& aComp, size_t aRegionStart, siz
         if( padW <= 0 || padH <= 0 || padW > 10000000 || padH > 10000000 )
             break;
 
-        // Post-dimension block
         size_t postDimPos = dimPos + PAD_DIMENSIONS_SIZE;
         size_t postDimSize = PAD_POST_DIM_FIXED_SIZE;
 
@@ -2194,7 +2373,7 @@ void PCB_PARSER::FindPadsInRegion( DT_COMPONENT& aComp, size_t aRegionStart, siz
         if( pad.number.IsEmpty() && !pad.label.IsEmpty() )
             pad.number = pad.label;
 
-        // Handle polygon pads (C=3) with inline vertex data
+        // Polygon pads (style C=3) carry inline vertex data after the post-dim header.
         if( padStyleC == 3 )
         {
             int vertexCount = ReadInt3At( data, postDimPos + 8 );
@@ -2245,10 +2424,8 @@ static constexpr int FP_SHAPE_COUNT_OFFSET = 71;
 /// Shape record data starts at this offset past the end of the pad region.
 static constexpr int FP_SHAPE_DATA_OFFSET = 74;
 
-/// Record size for v37 (legacy) format.
 static constexpr int FP_SHAPE_RECORD_SIZE_V37 = 62;
 
-/// Record size for v45+ format.
 static constexpr int FP_SHAPE_RECORD_SIZE_V45 = 60;
 
 /// v46+ chained-shape block layout used by some footprints (e.g. TO-92 in PCB_6).
@@ -2272,6 +2449,15 @@ static constexpr int FP_SHAPE_NORM_RANGE = 10000;
 
 /// Sentinel value for "use default line width" in shape width field.
 static constexpr int FP_SHAPE_DEFAULT_WIDTH = -10000;
+
+/// DipTrace footprint-graphic layer enum (int3 stored 5 bytes ahead of each shape's font block).
+static constexpr int DT_FP_LAYER_TOP_SILK      = 0;
+static constexpr int DT_FP_LAYER_TOP_ASSY      = 1;
+static constexpr int DT_FP_LAYER_TOP_MASK      = 2;
+static constexpr int DT_FP_LAYER_TOP_PASTE     = 3;
+static constexpr int DT_FP_LAYER_TOP_KEEPOUT   = 9;
+static constexpr int DT_FP_LAYER_TOP_COURTYARD = 16;
+static constexpr int DT_FP_LAYER_TOP_OUTLINE   = 18;
 
 
 // ---------------------------------------------------------------------------
@@ -2482,7 +2668,6 @@ void PCB_PARSER::FindShapesInRegion( DT_COMPONENT& aComp, size_t aRegionStart, s
         return;
     }
 
-    // Use the chain-derived pad region end position for shape lookup
     if( aComp.padRegionEnd == 0 || aComp.pads.empty() )
     {
         wxLogTrace( traceDiptraceIo, wxT( "DipTrace: no pad region end for shape finding in '%s'" ),
@@ -2603,7 +2788,7 @@ void PCB_PARSER::FindShapesInFontBlocks( DT_COMPONENT& aComp, size_t aRegionStar
 
                     int st = ReadInt3At( data, body + static_cast<size_t>( n ) * 8 );
 
-                    if( st == 0 || st == 1 || st == 2 || st == 3 || st == 6 || st == 7
+                    if( st == 0 || st == 1 || st == 2 || st == 3 || st == 5 || st == 6 || st == 7
                         || st == 700 )
                     {
                         npts = n;
@@ -2686,7 +2871,11 @@ void PCB_PARSER::FindShapesInFontBlocks( DT_COMPONENT& aComp, size_t aRegionStar
 
         size_t metaStart = blockStart + TAHOMA_FONT_PATTERN_LEN;
         int lineWidth = ReadInt4At( data, metaStart + 18 );
-        int layerIdx = ReadInt3At( data, metaStart + 22 );
+
+        // The footprint-graphic layer is a small int3 enum stored 5 bytes ahead of the block's
+        // "Tahoma" font literal (0 Top Silk, 1 Top Assembly, 2 Top Mask, 3 Top Paste,
+        // 16 Top Courtyard, 18 Top Outline). The metaStart+22 field is unrelated and constant.
+        int layerIdx = ( blockStart >= 5 ) ? ReadInt3At( data, blockStart - 5 ) : 0;
 
         size_t bodyPos = headerEnd;
 
@@ -2708,9 +2897,6 @@ void PCB_PARSER::FindShapesInFontBlocks( DT_COMPONENT& aComp, size_t aRegionStar
 
         int shapeType = ReadInt3At( data, bodyPos + 16 );
 
-        if( shapeType == 700 )
-            continue;
-
         DT_FP_SHAPE shape;
         shape.x1 = x1;
         shape.y1 = y1;
@@ -2719,20 +2905,21 @@ void PCB_PARSER::FindShapesInFontBlocks( DT_COMPONENT& aComp, size_t aRegionStar
         shape.width = lineWidth;
         shape.layer = layerIdx;
 
+        // v46+ font-block shape-type codes: 0 = axis-aligned rectangle, 1/5 = line,
+        // 2/6 = arc, 3 = circle, 700 = filled obround marker (polarity / pin-1 dot).
         if( shapeType == 0 )
         {
-            // v46+ font blocks use type 0 for axis-aligned rectangle outlines.
             shape.type = DT_SHAPE_RECT;
         }
-        else if( shapeType == DT_SHAPE_LINE || shapeType == 1 )
+        else if( shapeType == 1 || shapeType == 5 )
         {
             shape.type = DT_SHAPE_LINE;
         }
-        else if( shapeType == DT_SHAPE_CIRCLE || shapeType == 3 )
+        else if( shapeType == 3 )
         {
             shape.type = DT_SHAPE_CIRCLE;
         }
-        else if( shapeType == DT_SHAPE_ARC || shapeType == 2 )
+        else if( shapeType == 2 || shapeType == DT_SHAPE_ARC )
         {
             shape.type = DT_SHAPE_ARC;
 
@@ -2745,6 +2932,10 @@ void PCB_PARSER::FindShapesInFontBlocks( DT_COMPONENT& aComp, size_t aRegionStar
             {
                 continue;
             }
+        }
+        else if( shapeType == DT_SHAPE_FILLOBROUND )
+        {
+            shape.type = DT_SHAPE_FILLOBROUND;
         }
         else
         {
@@ -3104,7 +3295,6 @@ void PCB_PARSER::ParseTextRecords( int aCount )
         {
             DT_TEXT_OBJECT text;
 
-            // Header fields
             m_reader.ReadInt3();    // type_a
             m_reader.ReadByte();    // flag_a
             m_reader.ReadInt3();    // type_b
@@ -3114,26 +3304,21 @@ void PCB_PARSER::ParseTextRecords( int aCount )
             m_reader.ReadInt3();    // field_d
             m_reader.ReadInt3();    // field_e
 
-            // Colors
             text.color = ReadColorPacked( m_reader );
             ReadColorPacked( m_reader );   // color2
             ReadColorPacked( m_reader );   // color3
 
-            // Line/Layer
             text.lineWidth = m_reader.ReadInt4();
             text.layer = m_reader.ReadInt3();
 
-            // Geometry
             text.x1 = m_reader.ReadInt4();
             text.y1 = m_reader.ReadInt4();
             text.x2 = m_reader.ReadInt4();
             text.y2 = m_reader.ReadInt4();
 
-            // Content
             text.text = m_reader.ReadString();
             text.fontName = m_reader.ReadString();
 
-            // Post-font fields
             m_reader.ReadByte();    // separator
             m_reader.ReadInt3();    // field_pf_1
             m_reader.ReadByte();    // flag_pf
@@ -3365,11 +3550,10 @@ void PCB_PARSER::ParseNetRouting( DT_NET& aNet )
 
     size_t startPos = m_reader.GetOffset();
 
-    // Determine scan boundary: next net sentinel or capped distance
     static constexpr size_t MAX_NET_BODY = 65536;
     size_t scanEnd = std::min( startPos + MAX_NET_BODY, m_reader.GetFileSize() );
 
-    // Find the next net sentinel to avoid reading into the next net
+    // Cap the scan at the next net sentinel so it cannot read into the following net.
     size_t nextSentinel = m_reader.FindPattern( NET_SENTINEL, NET_SENTINEL_LEN,
                                                  startPos + 20, scanEnd );
 
@@ -3448,7 +3632,6 @@ void PCB_PARSER::ParseNetRouting( DT_NET& aNet )
         }
     }
 
-    // Scan for chain headers within this net body
     size_t pos = chainScanStart;
 
     while( pos + CHAIN_HEADER_LEN + 6 + TRACK_NODE_SIZE <= scanEnd )
@@ -3613,7 +3796,6 @@ void PCB_PARSER::ParseNetRouting( DT_NET& aNet )
             // byte(+22) is not reliable for via placement (set on many non-via nodes).
             node.hasVia = ( node.viaStyleIdx >= 0 );
 
-            // Sanity checks
             if( node.width <= 0 || node.width > 5000000 )
             {
                 valid = false;
@@ -4360,7 +4542,6 @@ void PCB_PARSER::FindAndParseZones( size_t aSearchStart, size_t aSearchEnd )
         int fieldB    = ReadInt3At( data, pos + 24 );
         int vtxCount  = ReadInt3At( data, pos + 27 );
 
-        // Validate header fields
         if( fieldA < 0 || fieldA > 10000 )
             break;
 
@@ -4394,7 +4575,6 @@ void PCB_PARSER::FindAndParseZones( size_t aSearchStart, size_t aSearchEnd )
         if( vtxEnd > aSearchEnd )
             break;
 
-        // Parse outline vertices and validate they're within board bounds
         DT_ZONE zone;
         zone.netIndex  = fieldB;
         zone.layer     = layer;
@@ -4601,12 +4781,10 @@ void PCB_PARSER::ApplyBoardSettings()
 
     m_board->SetCopperLayerCount( copperCount );
 
-    // Build the board stackup from the copper layer count
     BOARD_STACKUP& stackup = bds.GetStackupDescriptor();
     stackup.RemoveAll();
     stackup.BuildDefaultStackupList( &bds, copperCount );
 
-    // Enable the layers used by the design
     LSET enabledLayers = m_board->GetEnabledLayers();
 
     for( const DT_LAYER& layer : m_layers )
@@ -4627,7 +4805,6 @@ void PCB_PARSER::ApplyBoardSettings()
 
     m_board->SetEnabledLayers( enabledLayers );
 
-    // Apply default track width and clearance from the first design rule
     std::shared_ptr<NETCLASS> defNetclass = bds.m_NetSettings->GetDefaultNetclass();
 
     if( !m_designRules.empty() )
@@ -4641,7 +4818,6 @@ void PCB_PARSER::ApplyBoardSettings()
             defNetclass->SetClearance( ToKiCadCoord( firstRule.clearance ) );
     }
 
-    // Apply via definitions from parsed ViaStyles
     if( !m_viaStyles.empty() )
     {
         const DT_VIA_STYLE& firstVia = m_viaStyles[0];
@@ -4664,7 +4840,6 @@ void PCB_PARSER::CreateBoardOutline()
 
     if( !m_outline.empty() )
     {
-        // Build a list of converted points and their arc flags.
         size_t n = m_outline.size();
 
         if( n < 2 )
@@ -4681,7 +4856,6 @@ void PCB_PARSER::CreateBoardOutline()
             arcs.push_back( v.arc );
         }
 
-        // Walk the vertex list and emit individual Edge_Cuts segments and arcs.
         // In DipTrace, a vertex with arc=1 is an arc midpoint: the arc runs from the
         // previous (non-arc) vertex through this midpoint to the next (non-arc) vertex.
         size_t i = 0;
@@ -4732,8 +4906,6 @@ void PCB_PARSER::CreateBoardOutline()
 
             if( arcs[next] == 1 )
             {
-                // Next vertex is an arc midpoint.  The arc goes from pts[i] (start)
-                // through pts[next] (mid) to the vertex after that (end).
                 size_t afterArc = ( next + 1 ) % n;
 
                 const VECTOR2I& start = pts[i];
@@ -4755,12 +4927,10 @@ void PCB_PARSER::CreateBoardOutline()
                     addArc( start, mid, end );
                 }
 
-                // Advance past the arc midpoint; the end point becomes the new start
                 i = afterArc;
             }
             else
             {
-                // Straight segment from pts[i] to pts[next]
                 addSegment( pts[i], pts[next] );
 
                 i = next;
@@ -4806,7 +4976,7 @@ void PCB_PARSER::CreateBoardOutline()
     }
     else
     {
-        // Use bounding box as a closed rectangular outline (4 segments)
+        // Fall back to the board bounding box as a closed rectangular outline.
         int x1 = ToKiCadCoord( m_bboxXMin );
         int y1 = ToKiCadCoord( m_bboxYMin );
         int x2 = ToKiCadCoord( m_bboxXMax );
@@ -4987,42 +5157,66 @@ void PCB_PARSER::CreateFootprint( const DT_COMPONENT& aComp )
         footprint->Add( holePad, ADD_MODE::APPEND );
     }
 
+    // When a footprint carries a Top Assembly body outline, DipTrace treats it as the body
+    // graphic and suppresses the redundant Top Silk outline, leaving only silk markers such as
+    // the polarity dot. Footprints without an assembly outline (e.g. two-terminal caps) keep
+    // their silk outline. Detect the assembly outline up front so the silk lines can be dropped.
+    bool hasAssemblyOutline = false;
+
+    for( const DT_FP_SHAPE& s : aComp.shapes )
+    {
+        if( s.layer == DT_FP_LAYER_TOP_ASSY )
+        {
+            hasAssemblyOutline = true;
+            break;
+        }
+    }
+
     // Add footprint outline shapes (silkscreen / fab layer graphics)
     if( !aComp.shapes.empty() && aComp.bboxWidth != 0 && aComp.bboxHeight != 0 )
     {
         int scaleX = aComp.bboxWidth;
         int scaleY = aComp.bboxHeight;
 
-        // Heuristic for bbox axis swap detection.
-        // Shapes always use their largest extent along the Y axis (normalized ±5000).
-        // If the physical result has an extreme aspect ratio (< 0.2), the bbox axes
-        // are swapped relative to the shape coordinate frame.
-        int shapeXRange = 0;
-        int shapeYRange = 0;
-        int minSX = INT_MAX, maxSX = INT_MIN;
-        int minSY = INT_MAX, maxSY = INT_MIN;
-
-        for( const DT_FP_SHAPE& s : aComp.shapes )
+        // The bbox stores the PLACED (rotated) extent while the shape coordinates are canonical
+        // (the unrotated pattern frame). A 90/270-degree placement transposes the bbox width and
+        // height, so restore the canonical axes before scaling; SetOrientation() then rotates the
+        // shapes into place alongside the pads. Without this, a rotated connector's silk lands 90
+        // degrees off its pad field. The quarter-turn parity drives the swap exactly.
+        if( aComp.hasPlacementQuarterTurns )
         {
-            minSX = std::min( { minSX, s.x1, s.x2 } );
-            maxSX = std::max( { maxSX, s.x1, s.x2 } );
-            minSY = std::min( { minSY, s.y1, s.y2 } );
-            maxSY = std::max( { maxSY, s.y1, s.y2 } );
-        }
-
-        shapeXRange = maxSX - minSX;
-        shapeYRange = maxSY - minSY;
-
-        if( shapeXRange > 0 && shapeYRange > 0 )
-        {
-            double physX = static_cast<double>( shapeXRange ) * std::abs( scaleX )
-                           / FP_SHAPE_NORM_RANGE;
-            double physY = static_cast<double>( shapeYRange ) * std::abs( scaleY )
-                           / FP_SHAPE_NORM_RANGE;
-            double aspect = physX / physY;
-
-            if( aspect < 0.2 || aspect > 5.0 )
+            if( ( ( aComp.placementQuarterTurns % 2 ) + 2 ) % 2 == 1 )
                 std::swap( scaleX, scaleY );
+        }
+        else
+        {
+            // Legacy fallback when the placement metadata is absent: detect a transposed bbox from
+            // an extreme physical aspect ratio relative to the normalized shape extents.
+            int minSX = INT_MAX, maxSX = INT_MIN;
+            int minSY = INT_MAX, maxSY = INT_MIN;
+
+            for( const DT_FP_SHAPE& s : aComp.shapes )
+            {
+                minSX = std::min( { minSX, s.x1, s.x2 } );
+                maxSX = std::max( { maxSX, s.x1, s.x2 } );
+                minSY = std::min( { minSY, s.y1, s.y2 } );
+                maxSY = std::max( { maxSY, s.y1, s.y2 } );
+            }
+
+            int shapeXRange = maxSX - minSX;
+            int shapeYRange = maxSY - minSY;
+
+            if( shapeXRange > 0 && shapeYRange > 0 )
+            {
+                double physX = static_cast<double>( shapeXRange ) * std::abs( scaleX )
+                               / FP_SHAPE_NORM_RANGE;
+                double physY = static_cast<double>( shapeYRange ) * std::abs( scaleY )
+                               / FP_SHAPE_NORM_RANGE;
+                double aspect = physX / physY;
+
+                if( aspect < 0.2 || aspect > 5.0 )
+                    std::swap( scaleX, scaleY );
+            }
         }
 
         // Default line width when shape record uses the sentinel value
@@ -5045,14 +5239,32 @@ void PCB_PARSER::CreateFootprint( const DT_COMPONENT& aComp )
 
             shape->SetWidth( lineWidth );
 
-            PCB_LAYER_ID shapeLayer = MapLayer( dtShape.layer );
+            // Drop the redundant Top Silk OUTLINE when the assembly outline already describes the
+            // body, but keep silk fill markers such as the polarity dot. Footprints without an
+            // assembly outline (e.g. two-terminal caps) keep their silk outline.
+            if( hasAssemblyOutline && dtShape.layer == DT_FP_LAYER_TOP_SILK
+                && dtShape.type != DT_SHAPE_FILLOBROUND )
+            {
+                delete shape;
+                continue;
+            }
 
-            // Shapes default to silkscreen when the source layer is copper or undefined.
-            // Always assign the top-relative silk layer here; Flip() below mirrors the
-            // whole footprint (and its layers) for bottom-side components, so assigning
-            // B_SilkS here as well would double-flip the silk back onto the front.
-            if( shapeLayer == UNDEFINED_LAYER || IsCopperLayer( shapeLayer ) )
-                shapeLayer = F_SilkS;
+            // Map the DipTrace footprint-graphic layer enum to a top-relative KiCad layer.
+            // Bottom-side footprints are mirrored wholesale by Flip() below, so always assign
+            // the front layer here; assigning the back layer too would double-flip it.
+            PCB_LAYER_ID shapeLayer;
+
+            switch( dtShape.layer )
+            {
+            case DT_FP_LAYER_TOP_ASSY:      shapeLayer = F_Fab;   break;
+            case DT_FP_LAYER_TOP_MASK:      shapeLayer = F_Mask;  break;
+            case DT_FP_LAYER_TOP_PASTE:     shapeLayer = F_Paste; break;
+            case DT_FP_LAYER_TOP_KEEPOUT:   shapeLayer = F_CrtYd; break;
+            case DT_FP_LAYER_TOP_COURTYARD: shapeLayer = F_CrtYd; break;
+            case DT_FP_LAYER_TOP_OUTLINE:   shapeLayer = F_Fab;   break;
+            case DT_FP_LAYER_TOP_SILK:
+            default:                        shapeLayer = F_SilkS; break;
+            }
 
             shape->SetLayer( shapeLayer );
 
@@ -5103,8 +5315,39 @@ void PCB_PARSER::CreateFootprint( const DT_COMPONENT& aComp )
             {
                 VECTOR2I mid( scaleShapeCoord( dtShape.midX, scaleX ),
                               scaleShapeCoord( dtShape.midY, scaleY ) );
-                shape->SetShape( SHAPE_T::ARC );
-                shape->SetArcGeometry( p1, mid, p2 );
+
+                // A collinear midpoint yields a degenerate arc whose centre runs off to infinity
+                // (DipTrace stores some straight edges as a zero-bulge arc). Such a centre overflows
+                // the integer rotation math on a non-cardinal placement angle, so emit a segment.
+                int64_t cross = static_cast<int64_t>( p2.x - p1.x ) * ( mid.y - p1.y )
+                                - static_cast<int64_t>( p2.y - p1.y ) * ( mid.x - p1.x );
+                int64_t chordSq = static_cast<int64_t>( p2.x - p1.x ) * ( p2.x - p1.x )
+                                  + static_cast<int64_t>( p2.y - p1.y ) * ( p2.y - p1.y );
+
+                if( chordSq == 0 || std::abs( cross ) * 1000 < chordSq )
+                {
+                    shape->SetShape( SHAPE_T::SEGMENT );
+                    shape->SetStart( p1 );
+                    shape->SetEnd( p2 );
+                }
+                else
+                {
+                    shape->SetShape( SHAPE_T::ARC );
+                    shape->SetArcGeometry( p1, mid, p2 );
+                }
+            }
+            else if( dtShape.type == DT_SHAPE_FILLOBROUND )
+            {
+                // A small filled obround marker (the diode cathode / pin-1 dot). The two points
+                // are the bounding box corners; render it as a filled circle of that diameter.
+                VECTOR2I center( ( p1.x + p2.x ) / 2, ( p1.y + p2.y ) / 2 );
+                int radius = std::min( std::abs( p2.x - p1.x ), std::abs( p2.y - p1.y ) ) / 2;
+
+                shape->SetShape( SHAPE_T::CIRCLE );
+                shape->SetCenter( center );
+                shape->SetEnd( VECTOR2I( center.x + radius, center.y ) );
+                shape->SetFilled( true );
+                shape->SetWidth( 0 );
             }
             else
             {
@@ -5118,18 +5361,40 @@ void PCB_PARSER::CreateFootprint( const DT_COMPONENT& aComp )
 
     VECTOR2I pos( ToKiCadCoord( aComp.positionX ), ToKiCadCoord( aComp.positionY ) );
 
-    int orientationQuarterTurns = aComp.hasPlacementQuarterTurns
-                                          ? aComp.placementQuarterTurns
-                                          : static_cast<int>( std::lround(
-                                                  ToKiCadAngleDeg( aComp.rotation ) / 90.0 ) );
-    int orientationDeg = ( ( orientationQuarterTurns % 4 ) + 4 ) % 4;
-    orientationDeg *= 90;
+    // Prefer the exact placement-section angle; otherwise snap to the metadata quarter turn.
+    double orientationDeg;
+
+    if( aComp.hasPlacementAngle )
+    {
+        // The stored angle is cumulative (it can exceed a full turn, e.g. 630 or 990 degrees);
+        // reduce to a single turn for placement.
+        orientationDeg = std::fmod( aComp.placementAngleDeg, 360.0 );
+
+        if( orientationDeg < 0.0 )
+            orientationDeg += 360.0;
+
+        // The angle is recovered from a rounded-radian field, so a quarter-turn lands a hair off
+        // an exact multiple of 90 (e.g. 269.9994). Snap those back to the cardinal value so the
+        // footprint rotation takes the exact axis-swap path rather than a floating-point rotation.
+        double nearest90 = std::round( orientationDeg / 90.0 ) * 90.0;
+
+        if( std::abs( orientationDeg - nearest90 ) < 0.02 )
+            orientationDeg = std::fmod( nearest90, 360.0 );
+    }
+    else
+    {
+        int orientationQuarterTurns = aComp.hasPlacementQuarterTurns
+                                              ? aComp.placementQuarterTurns
+                                              : static_cast<int>( std::lround(
+                                                      ToKiCadAngleDeg( aComp.rotation ) / 90.0 ) );
+        orientationDeg = ( ( orientationQuarterTurns % 4 ) + 4 ) % 4 * 90.0;
+    }
 
     if( ShouldDumpFootprintOrientation( aComp.refdes ) )
     {
-        wxLogTrace( traceDiptraceIo, wxT( "DipTrace: fp-orient ref=%s pat=%s qturn=%d hasQ=%d rotRaw=%d chosen=%d" ),
-                    aComp.refdes, aComp.patternName, orientationQuarterTurns, aComp.hasPlacementQuarterTurns ? 1 : 0,
-                    aComp.rotation, orientationDeg );
+        wxLogTrace( traceDiptraceIo, wxT( "DipTrace: fp-orient ref=%s pat=%s qturn=%d hasQ=%d exact=%d chosen=%.2f" ), // format:allow
+                    aComp.refdes, aComp.patternName, aComp.placementQuarterTurns,
+                    aComp.hasPlacementQuarterTurns ? 1 : 0, aComp.hasPlacementAngle ? 1 : 0, orientationDeg );
     }
 
     // Set layer before orientation so bottom-side flip is handled first
@@ -5172,12 +5437,14 @@ void PCB_PARSER::CreateTextObject( const DT_TEXT_OBJECT& aText )
 
     text->SetLayer( textLayer );
 
-    // Position at the center of the text bounding box
-    int cx = ToKiCadCoord( ( aText.x1 + aText.x2 ) / 2 );
-    int cy = ToKiCadCoord( ( aText.y1 + aText.y2 ) / 2 );
+    // Position at the center of the text bounding box. x1/x2/y1/y2 are raw int4 values that are
+    // not range-checked, so sum/difference them in int64 to avoid signed-int overflow (UB).
+    int cx = ToKiCadCoord( static_cast<int>( ( static_cast<int64_t>( aText.x1 ) + aText.x2 ) / 2 ) );
+    int cy = ToKiCadCoord( static_cast<int>( ( static_cast<int64_t>( aText.y1 ) + aText.y2 ) / 2 ) );
     text->SetPosition( VECTOR2I( cx, cy ) );
 
-    int height = std::abs( ToKiCadCoord( aText.y2 - aText.y1 ) );
+    int height = std::abs(
+            ToKiCadCoord( static_cast<int>( static_cast<int64_t>( aText.y2 ) - aText.y1 ) ) );
 
     if( height > 0 )
         text->SetTextSize( VECTOR2I( height, height ) );
@@ -5467,7 +5734,6 @@ void PCB_PARSER::CreateTracksAndVias()
         if( !net && chain.netIndex >= 0 )
             missingChainNets++;
 
-        // Create track segments between consecutive nodes
         for( size_t i = 0; i + 1 < chain.nodes.size(); i++ )
         {
             const DT_TRACK_NODE& n0 = chain.nodes[i];

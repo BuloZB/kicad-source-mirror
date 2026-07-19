@@ -17,13 +17,10 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <stack>
@@ -753,6 +750,12 @@ void PCB_SELECTION_TOOL::EnterGroup()
 
     m_toolMgr->ProcessEvent( EVENTS::SelectedEvent );
 
+    // Processing the selection event can re-enter the tool and ExitGroup(), which clears
+    // m_enteredGroup. If that happened, don't operate on the now-stale (possibly null) group
+    // or we would hide/overlay a null item and crash (issue #24391).
+    if( m_enteredGroup != aGroup )
+        return;
+
     view()->Hide( m_enteredGroup, true );
     m_enteredGroupOverlay.Add( m_enteredGroup );
     view()->Update( &m_enteredGroupOverlay );
@@ -816,6 +819,15 @@ PCB_SELECTION& PCB_SELECTION_TOOL::RequestSelection( CLIENT_SELECTION_FILTER aCl
         }
 
         aClientFilter( VECTOR2I(), collector, this );
+
+        // Locked items were filtered with Override locks off. Keep the selection and return an
+        // empty one so the action does nothing. The banner then prompts to enable the override.
+        if( m_lockedItemsFiltered )
+        {
+            m_frame->GetCanvas()->ForceRefresh();
+            m_blockedSelection.Clear();
+            return m_blockedSelection;
+        }
 
         for( EDA_ITEM* item : collector )
         {
@@ -2224,6 +2236,12 @@ void PCB_SELECTION_TOOL::selectAllConnectedTracks( const std::vector<BOARD_CONNE
 
     auto connectivity = board()->GetConnectivity();
 
+    // Don't let expansion select outside an entered group, or select() would ExitGroup mid-walk.
+    auto inScope = [this]( BOARD_ITEM* aItem )
+    {
+        return isWithinEnteredGroup( aItem, m_enteredGroup, m_isFootprintEditor );
+    };
+
     std::set<PAD*>                     startPadSet;
     std::vector<BOARD_CONNECTED_ITEM*> cleanupItems;
 
@@ -2236,7 +2254,7 @@ void PCB_SELECTION_TOOL::selectAllConnectedTracks( const std::vector<BOARD_CONNE
         // Select any starting track items
         if( startItem->IsType( { PCB_TRACE_T, PCB_ARC_T, PCB_VIA_T } ) )
         {
-            if( itemPassesFilter( startItem, true ) )
+            if( itemPassesFilter( startItem, true ) && inScope( startItem ) )
                 select( startItem );
         }
     }
@@ -2449,7 +2467,7 @@ void PCB_SELECTION_TOOL::selectAllConnectedTracks( const std::vector<BOARD_CONNE
                     if( !itemPassesFilter( track, true ) )
                         continue;
 
-                    if( !track->IsSelected() )
+                    if( !track->IsSelected() && inScope( track ) )
                         select( track );
 
                     if( !track->HasFlag( SKIP_STRUCT ) )
@@ -2475,7 +2493,7 @@ void PCB_SELECTION_TOOL::selectAllConnectedTracks( const std::vector<BOARD_CONNE
                     if( !itemPassesFilter( shape, true ) )
                         continue;
 
-                    if( !shape->IsSelected() )
+                    if( !shape->IsSelected() && inScope( shape ) )
                         select( shape );
 
                     if( !shape->HasFlag( SKIP_STRUCT ) )
@@ -2498,7 +2516,7 @@ void PCB_SELECTION_TOOL::selectAllConnectedTracks( const std::vector<BOARD_CONNE
 
                 if( hitVia )
                 {
-                    if( !hitVia->IsSelected() )
+                    if( !hitVia->IsSelected() && inScope( hitVia ) )
                         select( hitVia );
 
                     if( !hitVia->HasFlag( SKIP_STRUCT ) )
@@ -2724,52 +2742,82 @@ int PCB_SELECTION_TOOL::grabUnconnected( const TOOL_EVENT& aEvent )
 {
     PCB_SELECTION originalSelection = m_selection;
 
-    // Get all pads
-    std::vector<PAD*> pads;
+    // Get all connected items that can represent the source side of the ratsnest.
+    std::vector<BOARD_CONNECTED_ITEM*> sourceItems;
 
     for( EDA_ITEM* item : m_selection.GetItems() )
     {
         if( item->Type() == PCB_FOOTPRINT_T )
         {
             for( PAD* pad : static_cast<FOOTPRINT*>( item )->Pads() )
-                pads.push_back( pad );
+                sourceItems.push_back( pad );
         }
-        else if( item->Type() == PCB_PAD_T )
+        else if( BOARD_CONNECTED_ITEM* connItem = dynamic_cast<BOARD_CONNECTED_ITEM*>( item ) )
         {
-            pads.push_back( static_cast<PAD*>( item ) );
+            sourceItems.push_back( connItem );
         }
     }
 
     ClearSelection();
 
-    // Select every footprint on the end of the ratsnest for each pad in our selection
     std::shared_ptr<CONNECTIVITY_DATA> conn = board()->GetConnectivity();
+    std::shared_ptr<CN_CONNECTIVITY_ALGO> connAlgo = conn->GetConnectivityAlgo();
 
-    for( PAD* pad : pads )
+    for( BOARD_CONNECTED_ITEM* sourceItem : sourceItems )
     {
-        const std::vector<CN_EDGE> edges = conn->GetRatsnestForPad( pad );
+        RN_NET* net = conn->GetRatsnestForNet( sourceItem->GetNetCode() );
 
         // Need to have something unconnected to grab
-        if( edges.size() == 0 )
+        if( !net || net->GetEdges().empty() || !connAlgo->ItemExists( sourceItem ) )
             continue;
+
+        std::vector<std::shared_ptr<CN_CLUSTER>> sourceClusters;
+
+        for( CN_ITEM* cnItem : connAlgo->ItemEntry( sourceItem ).GetItems() )
+        {
+            for( const std::shared_ptr<CN_ANCHOR>& anchor : cnItem->Anchors() )
+            {
+                if( anchor->GetCluster() )
+                    sourceClusters.push_back( anchor->GetCluster() );
+            }
+        }
+
+        if( sourceClusters.empty() )
+            continue;
+
+        auto isSourceAnchor =
+                [&]( const std::shared_ptr<const CN_ANCHOR>& aAnchor )
+                {
+                    if( aAnchor->Parent() == sourceItem )
+                        return true;
+
+                    return std::find( sourceClusters.begin(), sourceClusters.end(),
+                                      aAnchor->GetCluster() ) != sourceClusters.end();
+                };
 
         double     currentDistance = DBL_MAX;
         FOOTPRINT* nearest = nullptr;
 
         // Check every ratsnest line for the nearest one
-        for( const CN_EDGE& edge : edges )
+        for( const CN_EDGE& edge : net->GetEdges() )
         {
-            if( edge.GetSourceNode()->Parent()->GetParentFootprint()
-                == edge.GetTargetNode()->Parent()->GetParentFootprint() )
+            const std::shared_ptr<const CN_ANCHOR>& source = edge.GetSourceNode();
+            const std::shared_ptr<const CN_ANCHOR>& target = edge.GetTargetNode();
+
+            wxCHECK2( source && !source->Dirty() && target && !target->Dirty(), continue );
+
+            if( source->Parent()->GetParentFootprint() == target->Parent()->GetParentFootprint() )
             {
                 continue; // This edge is a loop on the same footprint
             }
 
-            // Figure out if we are the source or the target node on the ratnest
-            const CN_ANCHOR* other = edge.GetSourceNode()->Parent() == pad ? edge.GetTargetNode().get()
-                                                                           : edge.GetSourceNode().get();
+            bool sourceMatches = isSourceAnchor( source );
+            bool targetMatches = isSourceAnchor( target );
 
-            wxCHECK2( other && !other->Dirty(), continue );
+            if( sourceMatches == targetMatches )
+                continue;
+
+            const CN_ANCHOR* other = sourceMatches ? target.get() : source.get();
 
             // We only want to grab footprints, so the ratnest has to point to a pad
             if( other->Parent()->Type() != PCB_PAD_T )
@@ -4709,7 +4757,7 @@ void PCB_SELECTION_TOOL::GuessSelectionCandidates( GENERAL_COLLECTOR& aCollector
 }
 
 
-void PCB_SELECTION_TOOL::ReportFilteredLockedItems()
+bool PCB_SELECTION_TOOL::ReportFilteredLockedItems()
 {
     if( m_lockedItemsFiltered && m_frame )
     {
@@ -4717,6 +4765,35 @@ void PCB_SELECTION_TOOL::ReportFilteredLockedItems()
                                         "Enable 'Override locks' to operate on them." ),
                                      true );
     }
+
+    return m_lockedItemsFiltered;
+}
+
+
+bool PCB_SELECTION_TOOL::HasLockedDescendant( const BOARD_ITEM* aItem )
+{
+    bool lockedDescendant = false;
+
+    aItem->RunOnChildren(
+            [&]( BOARD_ITEM* curr_item )
+            {
+                if( !curr_item->GetParentFootprint() && curr_item->IsLocked() )
+                    lockedDescendant = true;
+            },
+            RECURSE_MODE::RECURSE );
+
+    return lockedDescendant;
+}
+
+
+bool PCB_SELECTION_TOOL::isWithinEnteredGroup( BOARD_ITEM* aItem, PCB_GROUP* aEnteredGroup, bool aIsFootprintEditor )
+{
+    if( aEnteredGroup )
+        return PCB_GROUP::WithinScope( aItem, aEnteredGroup, aIsFootprintEditor );
+
+    // Not entered: keep expansion at the top level so it can't reach into a group and
+    // silently pull the whole group into a later delete.
+    return aItem->GetParentGroup() == nullptr;
 }
 
 
@@ -4730,17 +4807,8 @@ void PCB_SELECTION_TOOL::FilterCollectorForLockedItems( GENERAL_COLLECTOR& aColl
         for( int i = (int) aCollector.GetCount() - 1; i >= 0; --i )
         {
             BOARD_ITEM* item = aCollector[i];
-            bool        lockedDescendant = false;
 
-            item->RunOnChildren(
-                    [&]( BOARD_ITEM* curr_item )
-                    {
-                        if( curr_item->IsLocked() )
-                            lockedDescendant = true;
-                    },
-                    RECURSE_MODE::RECURSE );
-
-            if( item->IsLocked() || lockedDescendant )
+            if( item->IsLocked() || HasLockedDescendant( item ) )
             {
                 aCollector.Remove( item );
                 m_lockedItemsFiltered = true;

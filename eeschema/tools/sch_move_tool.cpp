@@ -15,11 +15,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <algorithm>
@@ -28,6 +24,7 @@
 #include <optional>
 #include <set>
 #include <wx/log.h>
+#include <wx/utils.h>
 #include <trigo.h>
 #include <gal/graphics_abstraction_layer.h>
 #include <tool/tool_manager.h>
@@ -79,6 +76,70 @@ static bool isGraphicItemForDrop( const SCH_ITEM* aItem )
         return static_cast<const SCH_LINE*>( aItem )->IsGraphicLine();
     default:
         return false;
+    }
+}
+
+
+// Distance of a point along a sheet border, clockwise from the top-left corner.
+static long long sheetBorderArc( const SCH_SHEET* aSheet, SHEET_SIDE aSide, const VECTOR2I& aPos )
+{
+    long long left = aSheet->GetPosition().x;
+    long long top = aSheet->GetPosition().y;
+    long long w = aSheet->GetSize().x;
+    long long h = aSheet->GetSize().y;
+    long long right = left + w;
+    long long bot = top + h;
+
+    switch( aSide )
+    {
+    case SHEET_SIDE::TOP: return aPos.x - left;
+    case SHEET_SIDE::RIGHT: return w + ( aPos.y - top );
+    case SHEET_SIDE::BOTTOM: return w + h + ( right - aPos.x );
+    case SHEET_SIDE::LEFT: return 2 * w + h + ( bot - aPos.y );
+    default: return 0;
+    }
+}
+
+
+// Inverse of sheetBorderArc(), turns a border distance back into a point and edge.
+static void sheetBorderPos( const SCH_SHEET* aSheet, long long aArc, VECTOR2I& aPos, SHEET_SIDE& aSide )
+{
+    long long left = aSheet->GetPosition().x;
+    long long top = aSheet->GetPosition().y;
+    long long w = aSheet->GetSize().x;
+    long long h = aSheet->GetSize().y;
+    long long right = left + w;
+    long long bot = top + h;
+    long long perimeter = 2 * ( w + h );
+
+    if( perimeter <= 0 )
+    {
+        aPos = VECTOR2I( (int) left, (int) top );
+        aSide = SHEET_SIDE::TOP;
+        return;
+    }
+
+    aArc = ( ( aArc % perimeter ) + perimeter ) % perimeter;
+
+    if( aArc <= w )
+    {
+        aSide = SHEET_SIDE::TOP;
+        aPos = VECTOR2I( (int) ( left + aArc ), (int) top );
+    }
+    else if( aArc <= w + h )
+    {
+        aSide = SHEET_SIDE::RIGHT;
+        aPos = VECTOR2I( (int) right, (int) ( top + ( aArc - w ) ) );
+    }
+    else if( aArc <= 2 * w + h )
+    {
+        aSide = SHEET_SIDE::BOTTOM;
+        aPos = VECTOR2I( (int) ( right - ( aArc - w - h ) ), (int) bot );
+    }
+    else
+    {
+        aSide = SHEET_SIDE::LEFT;
+        aPos = VECTOR2I( (int) left, (int) ( bot - ( aArc - 2 * w - h ) ) );
     }
 }
 
@@ -170,6 +231,7 @@ void SCH_MOVE_TOOL::Reset( RESET_REASON aReason )
             m_changedDragLines.clear();
             m_specialCaseLabels.clear();
             m_specialCaseSheetPins.clear();
+            m_sheetPinDragArc.clear();
             m_hiddenJunctions.clear();
 
             // Clear any preview
@@ -658,6 +720,21 @@ bool SCH_MOVE_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, SCH_COMMIT* aComm
 
     bool lastCtrlDown = false;
 
+    // When items are pasted via Ctrl+V, the Ctrl key is still held when the move tool
+    // starts. Ctrl disables grid snapping, so the pasted items would track off-grid.
+    // The synthetic move action event carries no modifier bits, so query the live
+    // keyboard state and ignore Ctrl until the user releases and re-presses it.
+    bool pasteHoldingCtrl = false;
+
+    for( EDA_ITEM* item : selection )
+    {
+        if( item->HasFlag( IS_PASTED ) )
+        {
+            pasteHoldingCtrl = wxGetKeyState( WXK_CONTROL );
+            break;
+        }
+    }
+
     Activate();
 
     // Must be done after Activate() so that it gets set into the correct context
@@ -698,9 +775,21 @@ bool SCH_MOVE_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, SCH_COMMIT* aComm
 
         m_frame->GetCanvas()->SetCurrentCursor( currentCursor );
         grid.SetSnap( !evt->Modifier( MD_SHIFT ) );
-        grid.SetUseGrid( getView()->GetGAL()->GetGridSnapping() && !evt->DisableGridSnapping() );
 
         bool ctrlDown = evt->Modifier( MD_CTRL );
+
+        // Only real input events carry modifier state; the synthetic move action does not.
+        bool hasModifierState = evt->Category() == TC_MOUSE || evt->Category() == TC_KEYBOARD;
+
+        if( pasteHoldingCtrl && hasModifierState && !ctrlDown )
+            pasteHoldingCtrl = false;
+
+        // The paste-held Ctrl only masks grid snapping.  Ctrl also forces a graphics-only drop
+        // into a sheet, and that gesture must still honor a physically-held key.
+        bool gridSnapDisabled = ctrlDown && !pasteHoldingCtrl;
+
+        grid.SetUseGrid( getView()->GetGAL()->GetGridSnapping() && !gridSnapDisabled );
+
         lastCtrlDown = ctrlDown;
 
         if( evt->IsAction( &SCH_ACTIONS::restartMove )
@@ -782,9 +871,14 @@ bool SCH_MOVE_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, SCH_COMMIT* aComm
             else if( axisLock == AXIS_LOCK::VERTICAL )
                 m_cursor.x = prevPos.x;
 
-            // Find potential target sheet for dropping
-            SCH_SHEET* sheet = findTargetSheet( selection, m_cursor, selectionHasSheetPins,
-                                                selectionIsGraphicsOnly, ctrlDown );
+            // Find potential target sheet for dropping.  This relocation is only meaningful for a
+            // plain move; drag/break/slice reshape existing connections in place and must never
+            // pull items onto a sub-sheet's screen.
+            SCH_SHEET* sheet = nullptr;
+
+            if( m_mode == MOVE )
+                sheet = findTargetSheet( selection, m_cursor, selectionHasSheetPins, selectionIsGraphicsOnly,
+                                         ctrlDown );
 
             if( sheet != hoverSheet )
             {
@@ -1212,6 +1306,7 @@ void SCH_MOVE_TOOL::initializeMoveOperation( const TOOL_EVENT& aEvent, SCH_SELEC
     m_dragAdditions.clear();
     m_specialCaseLabels.clear();
     m_specialCaseSheetPins.clear();
+    m_sheetPinDragArc.clear();
     aInternalPoints.clear();
     clearNewDragLines();
 
@@ -1309,6 +1404,12 @@ void SCH_MOVE_TOOL::initializeMoveOperation( const TOOL_EVENT& aEvent, SCH_SELEC
                 RECURSE_MODE::RECURSE );
 
         schItem->SetStoredPos( schItem->GetPosition() );
+
+        if( schItem->Type() == SCH_SHEET_PIN_T && schItem->GetParent() && !schItem->GetParent()->IsSelected() )
+        {
+            SCH_SHEET_PIN* pin = static_cast<SCH_SHEET_PIN*>( schItem );
+            m_sheetPinDragArc[pin] = sheetBorderArc( pin->GetParent(), pin->GetSide(), pin->GetPosition() );
+        }
     }
 
     // Set up the starting position and move/drag offset
@@ -1626,8 +1727,87 @@ void SCH_MOVE_TOOL::performItemMove( SCH_SELECTION& aSelection, const VECTOR2I& 
         }
     }
 
+    spreadMovingSheetPinGroups( aSelection );
+
     if( aSelection.HasReferencePoint() )
         aSelection.SetReferencePoint( aSelection.GetReferencePoint() + aDelta );
+}
+
+
+void SCH_MOVE_TOOL::spreadMovingSheetPinGroups( const SCH_SELECTION& aSelection )
+{
+    // Slide pins dragged together by one distance along the border, so they keep their spacing
+    // and wrap around corners instead of collapsing onto a shared point on a perpendicular edge.
+    std::map<SCH_SHEET*, std::vector<SCH_SHEET_PIN*>> groups;
+
+    for( EDA_ITEM* item : aSelection )
+    {
+        if( item->Type() != SCH_SHEET_PIN_T )
+            continue;
+
+        SCH_SHEET_PIN* pin = static_cast<SCH_SHEET_PIN*>( item );
+
+        if( SCH_SHEET* sheet = pin->GetParent(); sheet && !sheet->IsSelected() && m_sheetPinDragArc.count( pin ) )
+        {
+            groups[sheet].push_back( pin );
+        }
+    }
+
+    for( auto& [sheet, pins] : groups )
+    {
+        if( pins.size() < 2 )
+            continue;
+
+        // Only slide as a group when the pins started on the same edge. A mix of edges would
+        // move in opposite directions (the border runs one way), so leave those to the normal
+        // per-pin constraint.
+        auto startSide = [&]( SCH_SHEET_PIN* aPin )
+        {
+            VECTOR2I   pos;
+            SHEET_SIDE side;
+            sheetBorderPos( sheet, m_sheetPinDragArc[aPin], pos, side );
+            return side;
+        };
+
+        SCH_SHEET_PIN* ref = pins.front();
+        SHEET_SIDE     refStartSide = startSide( ref );
+        bool           sameEdge = true;
+
+        for( SCH_SHEET_PIN* pin : pins )
+            sameEdge &= ( startSide( pin ) == refStartSide );
+
+        if( !sameEdge )
+            continue;
+
+        // The reference pin is already on its edge, its border travel drives the group slide.
+        long long refArc = sheetBorderArc( sheet, ref->GetSide(), ref->GetPosition() );
+        long long slide = refArc - m_sheetPinDragArc[ref];
+
+        for( SCH_SHEET_PIN* pin : pins )
+        {
+            VECTOR2I   pos;
+            SHEET_SIDE side;
+            sheetBorderPos( sheet, m_sheetPinDragArc[pin] + slide, pos, side );
+
+            pin->SetSide( side );
+
+            if( side == SHEET_SIDE::LEFT || side == SHEET_SIDE::RIGHT )
+                pin->SetTextY( pos.y );
+            else
+                pin->SetTextX( pos.x );
+
+            updateItem( pin, false );
+        }
+    }
+
+    // Pull attached lines back to the moved pins.
+    for( const auto& [pin, lineEnd] : m_specialCaseSheetPins )
+    {
+        if( lineEnd.second && lineEnd.first->HasFlag( STARTPOINT ) )
+            lineEnd.first->SetStartPoint( pin->GetPosition() );
+        else if( !lineEnd.second && lineEnd.first->HasFlag( ENDPOINT ) )
+            lineEnd.first->SetEndPoint( pin->GetPosition() );
+    }
 }
 
 
@@ -1776,6 +1956,15 @@ void SCH_MOVE_TOOL::updateStoredPositions( const SCH_SELECTION& aSelection )
         VECTOR2I oldPos = schItem->GetStoredPos();
         VECTOR2I newPos = schItem->GetPosition();
         schItem->SetStoredPos( newPos );
+
+        // Re-baseline the pin's border distance after a transform (e.g. rotation).
+        if( schItem->Type() == SCH_SHEET_PIN_T )
+        {
+            SCH_SHEET_PIN* pin = static_cast<SCH_SHEET_PIN*>( schItem );
+
+            if( m_sheetPinDragArc.count( pin ) )
+                m_sheetPinDragArc[pin] = sheetBorderArc( pin->GetParent(), pin->GetSide(), pin->GetPosition() );
+        }
 
         wxLogTrace( traceSchMove, "  item[%d] type=%d: stored pos updated (%d,%d) -> (%d,%d)",
                     itemCount++, (int) schItem->Type(), oldPos.x, oldPos.y, newPos.x, newPos.y );

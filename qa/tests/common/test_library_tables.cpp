@@ -14,12 +14,18 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <ranges>
+#include <utility>
+#include <vector>
+
+#include <wx/ffile.h>
 
 #include <mock_pgm_base.h>
 #include <richio.h>
@@ -28,11 +34,15 @@
 #include <settings/settings_manager.h>
 #include <pegtl/contrib/analyze.hpp>
 
+#include <env_vars.h>
+#include <pgm_base.h>
+#include <settings/common_settings.h>
 #include <libraries/library_manager.h>
 #include <libraries/library_table.h>
 #include <libraries/library_table_parser.h>
 #include <libraries/library_table_grammar.h>
 #include <settings/kicad_settings.h>
+#include <startwizard/startwizard_provider_libraries.h>
 
 
 BOOST_AUTO_TEST_SUITE( LibraryTables )
@@ -319,6 +329,8 @@ BOOST_AUTO_TEST_CASE( IsPcmManagedRow_URITemplateMatching )
           wxS( "Legacy versioned 3RD_PARTY template should still match the wildcard" ) },
         { wxS( "${KICAD10_3RD_PARTY}/footprints/bar/bar.pretty" ), true,
           wxS( "Footprint library using 3RD_PARTY template should match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/design_blocks/baz/baz.kicad_blocks" ), true,
+          wxS( "Design block library using 3RD_PARTY template should match" ) },
         { wxS( "${KICAD_USER_LIB}/symbols/test.kicad_sym" ), false,
           wxS( "Row using a different env var must not be flagged as PCM-managed" ) },
         { wxS( "${KIPRJMOD}/libs/local.kicad_sym" ), false,
@@ -329,6 +341,32 @@ BOOST_AUTO_TEST_CASE( IsPcmManagedRow_URITemplateMatching )
           wxS( "Malformed empty var name must not match" ) },
         { wxS( "${KICAD10_3RD_PARTY_EXTRA}/foo" ), false,
           wxS( "Similar-but-different var name must not match" ) },
+        // Issue #23476: a user who repurposes KICADn_3RD_PARTY to point at their own
+        // library collection adds libraries directly under that root (no PCM category
+        // folder). Such rows must not be treated as PCM-managed or auto-remove deletes
+        // them.
+        { wxS( "${KICAD10_3RD_PARTY}/mylib.kicad_sym" ), false,
+          wxS( "User library directly under repurposed 3RD_PARTY root must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/MyLibs/mylib.kicad_sym" ), false,
+          wxS( "User library under a non-PCM subfolder of 3RD_PARTY must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/eagle/imported.pretty" ), false,
+          wxS( "User footprint library under a non-PCM subfolder must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/symbols" ), false,
+          wxS( "3RD_PARTY/symbols with no nested package must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/symbols/mylib.kicad_sym" ), false,
+          wxS( "User symbol library directly in symbols folder (no package level) must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}symbols/foo/foo.kicad_sym" ), false,
+          wxS( "Missing separator after env var must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/design_blocks/baz/baz.kicad_dbl" ), false,
+          wxS( "Wrong design-block library extension must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/symbols/foo/foo.txt" ), false,
+          wxS( "Non-library file in PCM symbols tree must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}\\symbols\\foo\\foo.kicad_sym" ), false,
+          wxS( "Backslash-separated URI is never emitted by PCM and must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/symbols//foo.kicad_sym" ), false,
+          wxS( "Empty package-id component must not match" ) },
+        { wxS( "${KICAD10_3RD_PARTY}/symbols/foo/.kicad_sym" ), false,
+          wxS( "Extension-only leaf with empty library stem must not match" ) },
     };
 
     for( const CASE& c : cases )
@@ -432,6 +470,214 @@ BOOST_AUTO_TEST_CASE( LibOverrideSettings )
     BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 1 );
     manager.SetLibOverride( tablePath, nickname1, false, false );
     BOOST_REQUIRE( settings->m_LibOverrides.count( tablePath ) == 0 );
+}
+
+
+/**
+ * Regression test for https://gitlab.com/kicad/code/kicad/-/issues/24626.
+ *
+ * When KiCad ships no stock design-block-lib-table, CreateGlobalTable must produce a valid
+ * empty table rather than a table with a dangling row pointing at the missing file.
+ */
+BOOST_AUTO_TEST_CASE( CreateGlobalTableEmptyWhenNoStockTable )
+{
+    wxFileName stockPath( LIBRARY_MANAGER::StockTablePath( LIBRARY_TABLE_TYPE::DESIGN_BLOCK ) );
+
+    if( stockPath.IsFileReadable() )
+    {
+        BOOST_TEST_MESSAGE( "Skipping: stock design-block-lib-table exists; test only applies when "
+                            "no stock table is installed" );
+        return;
+    }
+
+    const wxString tablePath =
+            LIBRARY_MANAGER::DefaultGlobalTablePath( LIBRARY_TABLE_TYPE::DESIGN_BLOCK );
+
+    // RAII guard: restore the global table file to its original state after the test.
+    struct FILE_RESTORE
+    {
+        wxString path;
+        bool     existed = false;
+        wxString contents;
+
+        explicit FILE_RESTORE( const wxString& aPath ) : path( aPath )
+        {
+            existed = wxFileName::FileExists( path );
+
+            if( existed )
+            {
+                wxFFile in( path, wxT( "rb" ) );
+                in.ReadAll( &contents );
+            }
+        }
+
+        ~FILE_RESTORE()
+        {
+            if( existed )
+            {
+                wxFFile out( path, wxT( "wb" ) );
+                out.Write( contents );
+            }
+            else if( wxFileName::FileExists( path ) )
+            {
+                wxRemoveFile( path );
+            }
+        }
+    } restore( tablePath );
+
+    BOOST_REQUIRE( LIBRARY_MANAGER::CreateGlobalTable( LIBRARY_TABLE_TYPE::DESIGN_BLOCK, true ) );
+
+    LIBRARY_TABLE reloaded( wxFileName( tablePath ), LIBRARY_TABLE_SCOPE::GLOBAL );
+
+    BOOST_REQUIRE( reloaded.IsOk() );
+    BOOST_CHECK_MESSAGE( reloaded.Rows().empty(),
+                         "CreateGlobalTable must not write a dangling row when the stock table is absent" );
+}
+
+
+/**
+ * The stock-table reference URI written into a freshly created global table must only use the
+ * env-var token when the template-dir variable is defined externally (the relocatable-install
+ * case from https://gitlab.com/kicad/code/kicad/-/issues/23081). When the variable is at its
+ * built-in default the standard, resolved absolute path is preserved.
+ */
+BOOST_AUTO_TEST_CASE( StockTableReferenceURIHonorsExternalDefinition )
+{
+    const wxString   templateVar = ENV_VAR::GetVersionedEnvVarName( wxS( "TEMPLATE_DIR" ) );
+    COMMON_SETTINGS* common = Pgm().GetCommonSettings();
+
+    BOOST_REQUIRE( common != nullptr );
+
+    ENV_VAR_MAP& vars = common->m_Env.vars;
+
+    // Preserve and restore the original entry so neighbouring tests are unaffected.
+    const bool         hadEntry = vars.count( templateVar ) > 0;
+    const ENV_VAR_ITEM savedEntry = hadEntry ? vars[templateVar] : ENV_VAR_ITEM();
+
+    for( LIBRARY_TABLE_TYPE type : { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT,
+                                     LIBRARY_TABLE_TYPE::DESIGN_BLOCK } )
+    {
+        ENV_VAR_ITEM& entry = vars[templateVar];
+
+        entry.SetDefinedExternally( false );
+        BOOST_CHECK_EQUAL( LIBRARY_MANAGER::StockTableReferenceURI( type ),
+                           LIBRARY_MANAGER::StockTablePath( type ) );
+
+        entry.SetDefinedExternally( true );
+        BOOST_CHECK_EQUAL( LIBRARY_MANAGER::StockTableReferenceURI( type ),
+                           LIBRARY_MANAGER::StockTableTokenizedURI( type ) );
+    }
+
+    if( hadEntry )
+        vars[templateVar] = savedEntry;
+    else
+        vars.erase( templateVar );
+}
+
+
+/// Builds an in-memory symbol library table seeded with the given user rows.
+static LIBRARY_TABLE makeImportedSymbolTable( const std::vector<std::pair<wxString, wxString>>& aUserRows )
+{
+    LIBRARY_TABLE table( true, wxEmptyString, LIBRARY_TABLE_SCOPE::GLOBAL );
+    table.SetType( LIBRARY_TABLE_TYPE::SYMBOL );
+
+    for( const auto& [nickname, uri] : aUserRows )
+    {
+        LIBRARY_TABLE_ROW& row = table.InsertRow();
+        row.SetNickname( nickname );
+        row.SetURI( uri );
+        row.SetType( wxS( "KiCad" ) );
+    }
+
+    return table;
+}
+
+
+static size_t countChainedKiCadRows( const LIBRARY_TABLE& aTable )
+{
+    return std::ranges::count_if( aTable.Rows(),
+            []( const LIBRARY_TABLE_ROW& aRow )
+            {
+                return aRow.Type() == LIBRARY_TABLE_ROW::TABLE_TYPE_NAME
+                       && aRow.Nickname() == wxS( "KiCad" );
+            } );
+}
+
+
+/**
+ * Regression test for issue 24594. A user who removed every built-in KiCad library in the
+ * previous version selected "Import tables" + "Migrate built-in libraries"; migration must not
+ * silently add the stock libraries back into their table.
+ */
+BOOST_AUTO_TEST_CASE( MigrateBuiltInLibraries_NoStockRefsAddsNothing )
+{
+    const wxString stockPath = wxS( "${KICAD10_SYMBOL_DIR}/sym-lib-table" );
+
+    LIBRARY_TABLE table = makeImportedSymbolTable( {
+        { wxS( "MyParts" ),   wxS( "${KIPRJMOD}/../libs/MyParts.kicad_sym" ) },
+        { wxS( "MyPassives" ), wxS( "/home/user/kicad/MyPassives.kicad_sym" ) },
+    } );
+
+    const size_t rowsBefore = table.Rows().size();
+
+    bool modified = STARTWIZARD_PROVIDER_LIBRARIES::MigrateBuiltInLibraries(
+            table, LIBRARY_TABLE_TYPE::SYMBOL, stockPath, true );
+
+    BOOST_CHECK_MESSAGE( !modified, "Table with no stock references should not be modified" );
+    BOOST_CHECK_EQUAL( table.Rows().size(), rowsBefore );
+    BOOST_CHECK_EQUAL( countChainedKiCadRows( table ), 0u );
+}
+
+
+/// Direct stock rows are removed and replaced by a single chained reference to the latest stock.
+BOOST_AUTO_TEST_CASE( MigrateBuiltInLibraries_DirectStockRowsBecomeChained )
+{
+    const wxString stockPath = wxS( "${KICAD10_SYMBOL_DIR}/sym-lib-table" );
+
+    LIBRARY_TABLE table = makeImportedSymbolTable( {
+        { wxS( "Device" ),  wxS( "${KICAD9_SYMBOL_DIR}/Device.kicad_sym" ) },
+        { wxS( "MyParts" ), wxS( "${KIPRJMOD}/../libs/MyParts.kicad_sym" ) },
+    } );
+
+    bool modified = STARTWIZARD_PROVIDER_LIBRARIES::MigrateBuiltInLibraries(
+            table, LIBRARY_TABLE_TYPE::SYMBOL, stockPath, true );
+
+    BOOST_CHECK( modified );
+    BOOST_CHECK_EQUAL( countChainedKiCadRows( table ), 1u );
+
+    // The user's own row must survive and the direct stock row must be gone.
+    BOOST_CHECK( table.Row( wxS( "MyParts" ) ).has_value() );
+    BOOST_CHECK( !table.Row( wxS( "Device" ) ).has_value() );
+}
+
+
+/// An existing chained reference is repointed at the latest stock without a second one being added.
+BOOST_AUTO_TEST_CASE( MigrateBuiltInLibraries_ChainedRowMigratedInPlace )
+{
+    const wxString stockPath = wxS( "${KICAD10_SYMBOL_DIR}/sym-lib-table" );
+
+    LIBRARY_TABLE table( true, wxEmptyString, LIBRARY_TABLE_SCOPE::GLOBAL );
+    table.SetType( LIBRARY_TABLE_TYPE::SYMBOL );
+
+    LIBRARY_TABLE_ROW& chained = table.InsertRow();
+    chained.SetType( LIBRARY_TABLE_ROW::TABLE_TYPE_NAME );
+    chained.SetNickname( wxS( "KiCad" ) );
+    chained.SetURI( wxS( "${KICAD9_SYMBOL_DIR}/sym-lib-table" ) );
+
+    LIBRARY_TABLE_ROW& mine = table.InsertRow();
+    mine.SetNickname( wxS( "MyParts" ) );
+    mine.SetURI( wxS( "${KIPRJMOD}/../libs/MyParts.kicad_sym" ) );
+    mine.SetType( wxS( "KiCad" ) );
+
+    bool modified = STARTWIZARD_PROVIDER_LIBRARIES::MigrateBuiltInLibraries(
+            table, LIBRARY_TABLE_TYPE::SYMBOL, stockPath, true );
+
+    BOOST_CHECK( modified );
+    BOOST_CHECK_EQUAL( countChainedKiCadRows( table ), 1u );
+
+    auto migrated = table.Row( wxS( "KiCad" ) );
+    BOOST_REQUIRE( migrated.has_value() );
+    BOOST_CHECK_EQUAL( ( *migrated )->URI(), stockPath );
 }
 
 

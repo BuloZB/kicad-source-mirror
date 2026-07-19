@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef _CONNECTION_GRAPH_H
@@ -547,6 +547,17 @@ public:
     CONNECTION_SUBGRAPH* GetSubgraphForItem( SCH_ITEM* aItem ) const;
 
     const std::vector<CONNECTION_SUBGRAPH*>& GetAllSubgraphs( const wxString& aNetName ) const;
+
+    /**
+     * Map a bus group name between its alias and expanded forms ({MIXED_BUS} <-> {FOO BAR HAM EGGS}).
+     *
+     * Any sheet-path prefix on the input is preserved on the results so they resolve against the
+     * graph's net-name map.
+     *
+     * @param aBusName is the bus group name, optionally sheet-path qualified.
+     * @return the equivalent bus names, empty if none.
+     */
+    std::vector<wxString> GetEquivalentBusNames( const wxString& aBusName ) const;
 
     /**
      * Return the fully-resolved netname for a given subgraph.
@@ -1095,7 +1106,9 @@ private:
 
     std::unordered_map<wxString, std::vector<CONNECTION_SUBGRAPH*>> m_net_name_to_subgraphs_map;
 
-    std::unordered_map<SCH_ITEM*, CONNECTION_SUBGRAPH*> m_item_to_subgraph_map;
+    /// Every subgraph referencing the item, one per instantiating sheet path for items on shared
+    /// screens.  Removal must purge all of them or a freed item leaves a dangling driver behind.
+    std::unordered_map<SCH_ITEM*, std::vector<CONNECTION_SUBGRAPH*>> m_item_to_subgraph_map;
 
     NET_MAP m_net_code_to_subgraphs_map;
 

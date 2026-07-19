@@ -16,11 +16,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -30,6 +26,7 @@
 
 #include <wx/mimetype.h>
 #include <wx/dir.h>
+#include <wx/stdpaths.h>
 
 #include <pgm_base.h>
 #include <confirm.h>
@@ -269,6 +266,41 @@ int ExecuteFile( const wxString& aEditorName, const wxString& aFileName, wxProce
     msg.Printf( _( "Command '%s' could not be found." ), fullEditorName );
     DisplayErrorMessage( nullptr, msg );
     return -1;
+}
+
+
+int ExecuteCommandThroughShell( const wxString& aCommand, wxProcess* aProcess )
+{
+#ifdef __WXMSW__
+    wxExecuteEnv env;
+    wxGetEnvMap( &env.env );
+
+    // Prepend the app bin path so that KiCad's python is used by default
+    wxString binPath = wxFileName( wxStandardPaths::Get().GetExecutablePath() ).GetPath();
+    env.env["PATH"] = binPath + wxS( ';' ) + env.env["PATH"];
+
+    // The array form of wxExecute is unusable with cmd.exe. wx joins the argv elements back into a
+    // single command line, wrapping any element containing spaces in double quotes and escaping
+    // embedded quotes with backslashes. cmd.exe does not understand backslash-escaped quotes and
+    // applies its own quote-stripping rules to the /c argument, which mangles absolute paths that
+    // contain spaces or quotes. Build the command line ourselves and let cmd.exe's /s rule strip
+    // exactly the outer quote pair, passing everything between through verbatim. /d disables any
+    // AutoRun registry commands so job execution is not machine-dependent.
+    wxString shellCmd = wxS( "cmd.exe /d /s /c \"" ) + aCommand + wxS( "\"" );
+
+    return static_cast<int>( wxExecute( shellCmd, wxEXEC_SYNC, aProcess, &env ) );
+#else
+    // Invoke /bin/sh -c so glob expansion, pipes, and other shell features work. The string form of
+    // wxExecute would call execvp() directly, bypassing the shell. Hold the wchar buffers in named
+    // locals so the argv pointers stay valid on wxUSE_UNICODE_UTF8 builds where wc_str() is a temp.
+    wxWCharBuffer shell = wxString( wxS( "/bin/sh" ) ).wc_str();
+    wxWCharBuffer flag = wxString( wxS( "-c" ) ).wc_str();
+    wxWCharBuffer command = aCommand.wc_str();
+
+    const wchar_t* argv[] = { shell.data(), flag.data(), command.data(), nullptr };
+
+    return static_cast<int>( wxExecute( argv, wxEXEC_SYNC, aProcess ) );
+#endif
 }
 
 
@@ -724,23 +756,17 @@ bool isAncestorOrSame( const std::filesystem::path& aAncestor,
 }
 
 
-// Shared traverser for CollectFilesLoopSafe / CollectSubdirsLoopSafe.  Records
-// files, directories, or both into @p aOutput while deduplicating visited
-// directories by canonical path so recursive symlinks terminate.
+// records files dirs or both into aOutput loop-safe via DIR_LOOP_GUARD
 class LOOP_SAFE_COLLECTOR : public wxDirTraverser
 {
 public:
     LOOP_SAFE_COLLECTOR( wxArrayString& aOutput, const wxString& aRoot, bool aCollectFiles,
                          bool aCollectDirs ) :
             m_output( aOutput ),
-            m_root( canonicalPath( toFsPath( aRoot ) ) ),
+            m_guard( aRoot, DIR_LOOP_POLICY::BLOCK_ROOT_ESCAPE ),
             m_collectFiles( aCollectFiles ),
             m_collectDirs( aCollectDirs )
     {
-        m_visited.reserve( 256 );
-
-        if( !m_root.empty() )
-            m_visited.insert( m_root.generic_string() );
     }
 
     wxDirTraverseResult OnFile( const wxString& aFilename ) override
@@ -753,39 +779,7 @@ public:
 
     wxDirTraverseResult OnDir( const wxString& aDirname ) override
     {
-        const std::filesystem::path raw = toFsPath( aDirname );
-
-        // Fast path: a real (non-symlink) subdir can't introduce a cycle by
-        // itself, so skip the per-component weakly_canonical and use the
-        // string-only lexically_normal as the dedup key.  Cold-cache walks
-        // of large model libraries pay one lstat per dir instead of one per
-        // path component.
-        std::error_code ec;
-        const bool isLink = std::filesystem::is_symlink( raw, ec );
-
-        std::filesystem::path key;
-
-        if( isLink && !ec )
-        {
-            const std::filesystem::path canon = canonicalPath( raw );
-
-            if( canon.empty() )
-                return wxDIR_IGNORE;
-
-            // Refuse to escape the scan tree.  Stops Wine 'dosdevices/z: -> /'
-            // and similar root-escape symlinks from walking the whole disk
-            // before the visited-set catches the eventual re-entry.
-            if( !m_root.empty() && isAncestorOrSame( canon, m_root ) )
-                return wxDIR_IGNORE;
-
-            key = canon;
-        }
-        else
-        {
-            key = raw.lexically_normal();
-        }
-
-        if( !m_visited.insert( key.generic_string() ).second )
+        if( !m_guard.ShouldDescend( aDirname ) )
             return wxDIR_IGNORE;
 
         if( m_collectDirs )
@@ -795,11 +789,10 @@ public:
     }
 
 private:
-    wxArrayString&                  m_output;
-    std::filesystem::path           m_root;
-    bool                            m_collectFiles;
-    bool                            m_collectDirs;
-    std::unordered_set<std::string> m_visited;
+    wxArrayString& m_output;
+    DIR_LOOP_GUARD m_guard;
+    bool           m_collectFiles;
+    bool           m_collectDirs;
 };
 
 
@@ -816,6 +809,65 @@ void traverseLoopSafe( const wxString& aRoot, wxArrayString& aOutput, bool aColl
 }
 
 }  // namespace
+
+
+DIR_LOOP_GUARD::DIR_LOOP_GUARD( const wxString& aRoot, DIR_LOOP_POLICY aPolicy ) :
+        m_root( canonicalPath( toFsPath( aRoot ) ) ),
+        m_policy( aPolicy )
+{
+    m_visited.reserve( 256 );
+
+    if( !m_root.empty() )
+        m_visited.insert( m_root.generic_string() );
+}
+
+
+bool DIR_LOOP_GUARD::ShouldDescend( const wxString& aDir )
+{
+    const std::filesystem::path raw = toFsPath( aDir );
+    std::filesystem::path       key;
+
+    if( m_policy == DIR_LOOP_POLICY::CONFINE_TO_ROOT )
+    {
+        // confine fears any resolution outside the subtree so resolve every candidate
+        // a symlinked ancestor could otherwise smuggle an ordinary looking child out
+        const std::filesystem::path canon = canonicalPath( raw );
+
+        if( canon.empty() )
+            return false;
+
+        if( !m_root.empty() && !isAncestorOrSame( m_root, canon ) )
+            return false;
+
+        key = canon;
+    }
+    else
+    {
+        // escape only fears an upward link a real subdir cant be an ancestor of root
+        // so skip the per-component resolve and canonicalize actual links only
+        std::error_code ec;
+        const bool      isLink = std::filesystem::is_symlink( raw, ec );
+
+        if( isLink && !ec )
+        {
+            const std::filesystem::path canon = canonicalPath( raw );
+
+            if( canon.empty() )
+                return false;
+
+            if( !m_root.empty() && isAncestorOrSame( canon, m_root ) )
+                return false;
+
+            key = canon;
+        }
+        else
+        {
+            key = raw.lexically_normal();
+        }
+    }
+
+    return m_visited.insert( key.generic_string() ).second;
+}
 
 
 void CollectFilesLoopSafe( const wxString& aRoot, wxArrayString& aFiles, const wxString& aFileSpec,

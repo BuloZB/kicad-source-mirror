@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * https://www.gnu.org/licenses/gpl-3.0.html
- * or you may search the http://www.gnu.org website for the version 3 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef SIM_MODEL_IBIS_H
@@ -103,6 +99,9 @@ public:
     bool CanDifferential() const { return m_enableDiff; } ;
 
     const std::string& GetSeriesPartnerPin() const { return m_partnerPin; }
+
+    std::vector<wxString> GetSpiceIncludes( const SPICE_ITEM& aItem, SCHEMATIC* aSchematic,
+                                            REPORTER& aReporter ) const override;
 
     bool m_enableDiff;
 

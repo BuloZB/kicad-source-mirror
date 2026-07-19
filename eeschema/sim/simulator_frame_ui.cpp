@@ -17,11 +17,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * https://www.gnu.org/licenses/gpl-3.0.html
- * or you may search the http://www.gnu.org website for the version 3 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <algorithm>
@@ -3543,6 +3539,13 @@ void SIMULATOR_FRAME_UI::OnSimRefresh( bool aFinal )
         m_simConsole->SetInsertionPointEnd();
         simulator()->Command( "print all" );
     }
+
+    // Non-plottable analyses (op, pz, tf, sens, disto) still create an ngspice plot; record its
+    // name so a rerun can destroy it instead of leaking the vectors.  Plottable tabs already
+    // stored their (possibly noise-adjusted) plot name above.  A shared/stale plot name is caught
+    // when destroying, not here.
+    if( aFinal && !SIM_TAB::IsPlottable( simType ) )
+        simTab->SetSpicePlotName( simulator()->CurrentPlotName() );
 
     if( storeMultiRun )
     {

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <algorithm>
@@ -667,13 +663,16 @@ void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib, const wxStr
 
     for( FOOTPRINT* footprint : GetBoard()->Footprints() )
     {
+        bool saved = false;
+
         try
         {
             FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( &Prj() );
 
             if( !footprint->GetFPID().GetLibItemName().empty() )    // Handle old boards.
             {
-                FOOTPRINT* fpCopy = static_cast<FOOTPRINT*>( footprint->Duplicate( IGNORE_PARENT_GROUP ) );
+                std::unique_ptr<FOOTPRINT> fpCopy(
+                        static_cast<FOOTPRINT*>( footprint->Duplicate( IGNORE_PARENT_GROUP ) ) );
 
                 // Reset reference designator, group membership, and zone offset before saving
 
@@ -683,9 +682,8 @@ void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib, const wxStr
                 for( ZONE* zone : fpCopy->Zones() )
                     zone->Move( -fpCopy->GetPosition() );
 
-                adapter->SaveFootprint( nickname, fpCopy, true );
-
-                delete fpCopy;
+                adapter->SaveFootprint( nickname, fpCopy.get(), true );
+                saved = true;
             }
         }
         catch( const IO_ERROR& ioe )
@@ -693,7 +691,9 @@ void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib, const wxStr
             DisplayError( this, ioe.What() );
         }
 
-        if( map )
+        // Relink only if the footprint was actually written; otherwise the board would point
+        // at an entry the library does not contain.
+        if( map && saved )
         {
             LIB_ID id = footprint->GetFPID();
             id.SetLibNickname( nickname );
@@ -756,17 +756,16 @@ bool FOOTPRINT_EDIT_FRAME::SaveFootprint( FOOTPRINT* aFootprint )
         return false;
     }
 
-    if( nameChanged )
-    {
-        LIB_ID oldFPID( libraryName, m_footprintNameWhenLoaded );
-        DeleteFootprintFromLibrary( oldFPID, false );
-    }
-
+    // Save the renamed footprint before deleting the original, so a failed save does not
+    // destroy the old entry and lose the user's work (issue #23850).
     if( !SaveFootprintInLibrary( aFootprint, libraryName ) )
         return false;
 
     if( nameChanged )
     {
+        LIB_ID oldFPID( libraryName, m_footprintNameWhenLoaded );
+        DeleteFootprintFromLibrary( oldFPID, false );
+
         m_footprintNameWhenLoaded = footprintName;
         SyncLibraryTree( true );
     }
@@ -831,7 +830,16 @@ bool FOOTPRINT_EDIT_FRAME::SaveFootprintInLibrary( FOOTPRINT* aFootprint,
                 RECURSE_MODE::RECURSE );
 
         FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( &Prj() );
-        adapter->SaveFootprint( aLibraryName, aFootprint );
+
+        if( adapter->SaveFootprint( aLibraryName, aFootprint ) != FOOTPRINT_LIBRARY_ADAPTER::SAVE_OK )
+        {
+            aFootprint->SetFPID( LIB_ID( aLibraryName, aFootprint->GetFPID().GetLibItemName() ) );
+
+            DisplayError( this, wxString::Format( _( "Footprint '%s' could not be saved to library '%s'." ),
+                                                  aFootprint->GetFPID().GetUniStringLibItemName(),
+                                                  aLibraryName ) );
+            return false;
+        }
 
         aFootprint->SetFPID( LIB_ID( aLibraryName, aFootprint->GetFPID().GetLibItemName() ) );
 
@@ -966,7 +974,8 @@ bool FOOTPRINT_EDIT_FRAME::SaveFootprintToBoard( bool aAddNew )
         // In the main board the new footprint replaces the old one (pos, orient, ref, value,
         // connections and properties are kept) and the sourceFootprint (old footprint) is
         // deleted
-        pcbframe->ExchangeFootprint( sourceFootprint, newFootprint, commit, true );
+        mainpcb->ExchangeFootprint( sourceFootprint, newFootprint, commit, true );
+
         commit.Push( _( "Update Footprint" ) );
     }
     else        // This is an insert command

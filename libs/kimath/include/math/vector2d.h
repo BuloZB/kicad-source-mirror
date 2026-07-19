@@ -18,11 +18,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #ifndef VECTOR2D_H_
@@ -287,8 +283,8 @@ T VECTOR2<T>::EuclideanNorm() const
     {
         if constexpr( std::is_integral<T>::value )
             return KiROUND<double, T>( std::abs( x ) * M_SQRT2 );
-
-        return static_cast<T>( std::abs( x ) * M_SQRT2 );
+        else
+            return static_cast<T>( std::abs( x ) * M_SQRT2 );
     }
 
     if( x == 0 )
@@ -298,8 +294,8 @@ T VECTOR2<T>::EuclideanNorm() const
 
     if constexpr( std::is_integral<T>::value )
         return KiROUND<double, T>( std::hypot( x, y ) );
-
-    return static_cast<T>( std::hypot( x, y ) );
+    else
+        return static_cast<T>( std::hypot( x, y ) );
 }
 
 

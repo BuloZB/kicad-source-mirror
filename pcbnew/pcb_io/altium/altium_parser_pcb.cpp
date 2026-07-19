@@ -15,11 +15,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <cmath>
@@ -918,6 +914,31 @@ ARULE6::ARULE6( ALTIUM_BINARY_PARSER& aReader )
         THROW_IO_ERROR( wxT( "Rules6 stream was not parsed correctly" ) );
 }
 
+ASMARTUNION6::ASMARTUNION6( ALTIUM_BINARY_PARSER& aReader )
+{
+    std::map<wxString, wxString> props = aReader.ReadProperties();
+
+    if( props.empty() )
+        THROW_IO_ERROR( wxT( "SmartUnions stream has no props" ) );
+
+    unionindex = ALTIUM_PROPS_UTILS::ReadInt( props, wxT( "UNIONINDEX" ), 0 );
+    is_tuning  = ALTIUM_PROPS_UTILS::ReadBool( props, wxT( "TRACETUNINGVALID" ), false );
+
+    // A tuned differential pair names its pair here; single-track tuning leaves it empty.
+    is_diffpair = !ALTIUM_PROPS_UTILS::ReadString( props, wxT( "TUNEDOBJECTDIFFPAIR" ),
+                                                   wxT( "" ) ).IsEmpty();
+
+    style        = ALTIUM_PROPS_UTILS::ReadInt( props, wxT( "STYLE" ), 0 );
+    gap          = ALTIUM_PROPS_UTILS::ReadKicadUnit( props, wxT( "GAP" ), wxT( "0mil" ) );
+    amplitude    = ALTIUM_PROPS_UTILS::ReadKicadUnit( props, wxT( "AMPLITUDE" ), wxT( "0mil" ) );
+    minamplitude = ALTIUM_PROPS_UTILS::ReadKicadUnit( props, wxT( "MINAMPLITUDE" ), wxT( "0mil" ) );
+    mitterradiusratio = ALTIUM_PROPS_UTILS::ReadDouble( props, wxT( "MITTERRADIUSRATIO" ), 0.0 );
+    singleside   = ALTIUM_PROPS_UTILS::ReadBool( props, wxT( "SINGLESIDE" ), false );
+
+    if( aReader.HasParsingError() )
+        THROW_IO_ERROR( wxT( "SmartUnions stream was not parsed correctly" ) );
+}
+
 AARC6::AARC6( ALTIUM_BINARY_PARSER& aReader )
 {
     ALTIUM_RECORD recordtype = static_cast<ALTIUM_RECORD>( aReader.Read<uint8_t>() );
@@ -953,7 +974,8 @@ AARC6::AARC6( ALTIUM_BINARY_PARSER& aReader )
 
     if( remaining >= 9 )
     {
-        aReader.Skip( 5 );
+        aReader.Skip( 1 );
+        unionindex = aReader.Read<uint32_t>();
         layer_v7 = static_cast<ALTIUM_LAYER>( aReader.Read<uint32_t>() );
     }
 
@@ -1310,7 +1332,8 @@ ATRACK6::ATRACK6( ALTIUM_BINARY_PARSER& aReader )
 
     if( remaining >= 9 )
     {
-        aReader.Skip( 5 );
+        unionindex = aReader.Read<uint32_t>();
+        aReader.Skip( 1 );
         layer_v7 = static_cast<ALTIUM_LAYER>( aReader.Read<uint32_t>() );
     }
 

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -126,12 +122,13 @@ struct DT_MOUNT_HOLE
 
 enum DT_SHAPE_TYPE
 {
-    DT_SHAPE_EMPTY  = 0,
-    DT_SHAPE_LINE   = 1,
-    DT_SHAPE_RECT   = 2,
-    DT_SHAPE_CIRCLE = 3,
-    DT_SHAPE_ARC    = 6,
-    DT_SHAPE_END    = -1
+    DT_SHAPE_EMPTY      = 0,
+    DT_SHAPE_LINE       = 1,
+    DT_SHAPE_RECT       = 2,
+    DT_SHAPE_CIRCLE     = 3,
+    DT_SHAPE_ARC        = 6,
+    DT_SHAPE_FILLOBROUND = 700, ///< Filled obround marker (e.g. diode cathode / pin-1 dot)
+    DT_SHAPE_END        = -1
 };
 
 struct DT_FP_SHAPE
@@ -152,8 +149,10 @@ struct DT_COMPONENT
     wxString libraryPath;
     int      positionX = 0;    ///< DipTrace units
     int      positionY = 0;    ///< DipTrace units
-    int      placementQuarterTurns = 0; ///< Board-placement angle in 90-degree turns (from boundary-59 int3)
+    int      placementQuarterTurns = 0; ///< Board-placement angle snapped to 90-degree turns (metadata Id-6 int3)
     bool     hasPlacementQuarterTurns = false;
+    double   placementAngleDeg = 0.0;  ///< Exact board-placement angle in degrees (placement section), when available
+    bool     hasPlacementAngle = false;
     int      rotation = 0;     ///< Raw header int4; matches Pattern.Float1 in DipXML (not placement angle)
     int      fieldC = 0;       ///< Raw header int4; matches Pattern.Float2 in DipXML
     int      fieldD = 0;       ///< Raw header int4; matches Pattern.Float3 in DipXML
@@ -345,6 +344,19 @@ private:
     void ParseImplicitPatternStyleGroup();
     void ParseDesignRules();
     void FindAndParseComponents();
+
+    /**
+     * Refine component placement angles with the exact values from the placement section.
+     *
+     * The per-component metadata block yields only a 90-degree-snapped quarter-turn count.
+     * A separate placement section stores the exact placement angle (radians, fixed-point)
+     * for every component, but the section has no per-entry key that maps cleanly back to a
+     * geometry record. When the section's angle list lines up with the parsed components --
+     * same count and every angle snapping to the component's own quarter-turn -- the exact
+     * angles are adopted; otherwise the snapped quarter turns are kept.
+     */
+    void ApplyPlacementAngles();
+
     void ParsePostComponentSections();
 
     /// Deterministically walk the component boundaries from the design-rules end, anchoring on

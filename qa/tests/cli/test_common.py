@@ -15,9 +15,7 @@
 #  GNU General Public License for more details.
 #
 #  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software
-#  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-#  MA 02110-1301, USA.
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
 import pytest
@@ -81,3 +79,28 @@ def test_jobset_run_relative_project_path(tmp_path):
     # A crash would manifest as a non-zero/negative exit code; the archive must also be produced.
     assert exitcode == 0
     assert (work_dir / "output" / "issue24474-gerber.zip").exists()
+
+
+def test_jobset_run_unknown_job_type(tmp_path):
+    """A jobset saved by a newer KiCad can contain job types this version does not know.
+
+    These used to deserialize to a null job and segfault as soon as the job list was
+    printed. Now they load as placeholders and fail the run with a clear message.
+    """
+    source_dir = Path(__file__).resolve().parent.parent.parent / "data" / "cli" / "jobset_unknown_type"
+    work_dir = tmp_path / "jobset_unknown_type"
+    shutil.copytree(source_dir, work_dir)
+
+    command = [
+        utils.kicad_cli(),
+        "jobset", "run",
+        "--file", "jobset_unknown_type.kicad_jobset",
+        "jobset_unknown_type.kicad_pro",
+    ]
+
+    stdout, stderr, exitcode = utils.run_and_capture(command, cwd=work_dir)
+
+    # The run must fail gracefully: a positive exit code, not a signal (segfault gives a
+    # negative returncode), and the unknown job reported by name.
+    assert exitcode > 0
+    assert "Unsupported job type 'special_from_the_future'" in stdout

@@ -14,11 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "dialog_lib_symbol_properties.h"
@@ -38,12 +34,14 @@
 #include <widgets/wx_grid.h>
 #include <widgets/std_bitmap_button.h>
 #include <string_utils.h>
+#include <template_fieldnames.h>
 #include <project_sch.h>
 #include <refdes_utils.h>
 #include <dialog_sim_model.h>
 #include <vector>
 
 #include <panel_embedded_files.h>
+#include <panel_symbol_pin_map.h>
 #include <settings/settings_manager.h>
 #include <symbol_editor_settings.h>
 #include <widgets/listbox_tricks.h>
@@ -83,6 +81,9 @@ DIALOG_LIB_SYMBOL_PROPERTIES::DIALOG_LIB_SYMBOL_PROPERTIES( SYMBOL_EDIT_FRAME* a
 
     m_embeddedFiles = new PANEL_EMBEDDED_FILES( m_NoteBook, m_libEntry, 0, std::move( inheritedEmbeddedFiles ) );
     m_NoteBook->AddPage( m_embeddedFiles, _( "Embedded Files" ) );
+
+    m_pinMapPanel = new PANEL_SYMBOL_PIN_MAP( m_pinMapPage );
+    bPinMapPageSizer->Add( m_pinMapPanel, 1, wxEXPAND, 5 );
 
     m_fields = new FIELDS_GRID_TABLE( this, aParent, m_grid, m_libEntry, { m_embeddedFiles->GetLocalFiles() } );
     m_grid->SetTable( m_fields );
@@ -192,6 +193,22 @@ DIALOG_LIB_SYMBOL_PROPERTIES::DIALOG_LIB_SYMBOL_PROPERTIES( SYMBOL_EDIT_FRAME* a
     Layout();
 
     finishDialogSettings();
+}
+
+
+void DIALOG_LIB_SYMBOL_PROPERTIES::SelectPinMapPage()
+{
+    // TransferDataToWindow restores the remembered page, so defer the switch to a flag it honours.
+    m_forcePinMapPage = true;
+
+    for( size_t page = 0; page < m_NoteBook->GetPageCount(); ++page )
+    {
+        if( m_NoteBook->GetPage( page ) == m_pinMapPage )
+        {
+            m_NoteBook->SetSelection( page );
+            return;
+        }
+    }
 }
 
 
@@ -422,6 +439,29 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::TransferDataToWindow()
 
     m_embeddedFiles->TransferDataToWindow();
 
+    m_grid->SetMinVisibleRows( this, 4 );
+
+    m_pinMapPanel->SetSymbol( m_libEntry );
+    m_pinMapPanel->TransferDataToWindow();
+
+    // Always open on the General page, unless the caller explicitly asked for the Pin Map
+    // tab (the Edit Pin Map button).  This overrides DIALOG_SHIM's remembered-tab restore.
+    int targetPage = 0;
+
+    if( m_forcePinMapPage )
+    {
+        for( size_t page = 0; page < m_NoteBook->GetPageCount(); ++page )
+        {
+            if( m_NoteBook->GetPage( page ) == m_pinMapPage )
+            {
+                targetPage = (int) page;
+                break;
+            }
+        }
+    }
+
+    m_NoteBook->ChangeSelection( targetPage );
+
     return true;
 }
 
@@ -527,12 +567,15 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::Validate()
     {
         bodyStyleCount = 1;
     }
-    if( m_radioDeMorgan->GetValue() )
+    else if( m_radioDeMorgan->GetValue() )
     {
         bodyStyleCount = 2;
     }
     else if( m_radioCustom->GetValue() )
     {
+        if( !m_bodyStyleNamesGrid->CommitPendingChanges() )
+            return false;
+
         for( int ii = 0; ii < m_bodyStyleNamesGrid->GetNumberRows(); ++ii )
         {
             if( !m_bodyStyleNamesGrid->GetCellValue( ii, 0 ).IsEmpty() )
@@ -540,9 +583,9 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::Validate()
         }
     }
 
-    if( bodyStyleCount == 0 )
+    if( m_radioCustom->GetValue() && bodyStyleCount < 2 )
     {
-        m_delayedErrorMessage = _( "Symbol must have at least 1 body style" );
+        m_delayedErrorMessage = _( "Custom body styles must have at least 2 entries" );
         return false;
     }
 
@@ -596,7 +639,14 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::TransferDataFromWindow()
         opType = UNDO_REDO::LIB_RENAME;
     }
 
-    m_Parent->SaveCopyInUndoList( _( "Edit Symbol Properties" ), m_libEntry, opType );
+    // When invoked from the library tree (Symbol Properties context menu) we edit a buffered
+    // copy that is not the symbol loaded in the editor.  The editor-coupled side effects below
+    // (undo list, view/title refresh) operate on the frame's current symbol, so only run them
+    // when we are actually editing it.  The library-tree path does its own buffer/tree update.
+    bool editingCurrentSymbol = ( m_libEntry == m_Parent->GetCurSymbol() );
+
+    if( editingCurrentSymbol )
+        m_Parent->SaveCopyInUndoList( _( "Edit Symbol Properties" ), m_libEntry, opType );
 
     // The Y axis for components in lib is from bottom to top while the screen axis is top
     // to bottom: we must change the y coord sign when writing back to the library
@@ -612,8 +662,15 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::TransferDataFromWindow()
 
         wxString fieldName = field.GetCanonicalName();
 
-        if( m_fields->IsInherited( ii ) && field == m_fields->ParentField( ii ) )
-            continue; // Skip inherited fields
+        // Writing an unmodified inherited row into the derived symbol would stop it from
+        // tracking the parent field.  Fields the symbol already owns (transferred user
+        // fields) are kept even when they match the parent.  operator== is owner-sensitive,
+        // so compare content.
+        if( m_fields->IsInherited( ii ) && !m_libEntry->GetField( fieldName )
+                && field.HasSameContent( m_fields->ParentField( ii ) ) )
+        {
+            continue;
+        }
 
         if( field.GetText().IsEmpty() )
         {
@@ -757,7 +814,13 @@ bool DIALOG_LIB_SYMBOL_PROPERTIES::TransferDataFromWindow()
         }
     }
 
-    m_Parent->UpdateAfterSymbolProperties( &oldName );
+    if( !m_pinMapPanel->CommitPendingChanges() )
+        return false;
+
+    m_pinMapPanel->ApplyToSymbol( m_libEntry );
+
+    if( editingCurrentSymbol )
+        m_Parent->UpdateAfterSymbolProperties( &oldName );
 
     return true;
 }
@@ -817,7 +880,7 @@ void DIALOG_LIB_SYMBOL_PROPERTIES::OnGridCellChanging( wxGridEvent& event )
             if( i == event.GetRow() )
                 continue;
 
-            if( newName.CmpNoCase( m_grid->GetCellValue( i, FDC_NAME ) ) == 0 )
+            if( FieldNamesAreDuplicates( newName, m_grid->GetCellValue( i, FDC_NAME ) ) )
             {
                 DisplayError( this, wxString::Format( _( "The name '%s' is already in use." ), newName ) );
                 event.Veto();

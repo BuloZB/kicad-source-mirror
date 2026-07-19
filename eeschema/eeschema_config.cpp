@@ -13,8 +13,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <mutex>
@@ -314,6 +314,7 @@ void SCH_EDIT_FRAME::LoadSettings( APP_SETTINGS_BASE* aCfg )
     GetRenderSettings()->m_ShowPinsElectricalType = false;
     GetRenderSettings()->m_ShowPinNumbers = false;
     GetRenderSettings()->m_ShowPinAltIcons = cfg->m_Appearance.show_pin_alt_icons;
+    GetRenderSettings()->m_ShowRemappedPinNumbers = cfg->m_Appearance.show_remapped_pin_numbers;
     GetRenderSettings()->SetDefaultFont( cfg->m_Appearance.default_font );
 }
 

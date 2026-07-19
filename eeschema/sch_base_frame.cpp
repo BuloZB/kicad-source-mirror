@@ -15,11 +15,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, you may find one here:
- * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- * or you may search the http://www.gnu.org website for the version 2 license,
- * or you may write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <algorithm>
@@ -357,9 +353,14 @@ void SCH_BASE_FRAME::ActivateGalCanvas()
 
         m_spaceMouse->SetCanvas( GetCanvas() );
     }
-    catch( const std::system_error& e )
+    catch( const std::exception& e )
     {
-        wxLogTrace( wxT( "KI_TRACE_NAVLIB" ), e.what() );
+        wxLogTrace( wxT( "KI_TRACE_NAVLIB" ), wxS( "%s" ), e.what() );
+    }
+    catch( ... )
+    {
+        wxLogTrace( wxT( "KI_TRACE_NAVLIB" ),
+                    wxT( "Unknown exception during SpaceMouse initialization" ) );
     }
 }
 
@@ -918,6 +919,17 @@ void SCH_BASE_FRAME::OnSymChangeDebounceTimer( wxTimerEvent& aEvent )
     if( !IsEnabled() )
     {
         wxLogTrace( traceLibWatch, "Frame disabled (dialog open); restarting debounce timer" );
+        m_watcherDebounceTimer.StartOnce( 1000 );
+        return;
+    }
+
+    // An interactive tool (move, draw, place pin/text) holds references into the current symbol
+    // while its event loop runs.  Reloading now would free those out from under the running tool
+    // and crash.  Restart the timer before touching the watcher timestamp so the reload is retried
+    // once the tool finishes rather than silently dropped.
+    if( !ToolStackIsEmpty() )
+    {
+        wxLogTrace( traceLibWatch, "Interactive tool active; restarting debounce timer" );
         m_watcherDebounceTimer.StartOnce( 1000 );
         return;
     }
