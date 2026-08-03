@@ -309,7 +309,7 @@ void DRC_ENGINE::loadImplicitRules()
                 if( nc->HasDiffPairWidth() )
                 {
                     std::shared_ptr<DRC_RULE> netclassRule = std::make_shared<DRC_RULE>();
-                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' (diff pair)" ),
+                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' diff pair" ),
                                                              nc->GetDiffPairWidthParent()->GetHumanReadableName() );
                     netclassRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::NET_CLASS );
 
@@ -326,7 +326,7 @@ void DRC_ENGINE::loadImplicitRules()
                 if( nc->HasDiffPairGap() )
                 {
                     std::shared_ptr<DRC_RULE> netclassRule = std::make_shared<DRC_RULE>();
-                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' (diff pair)" ),
+                    netclassRule->m_Name = wxString::Format( _( "netclass '%s'" ),
                                                              nc->GetDiffPairGapParent()->GetHumanReadableName() );
                     netclassRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::NET_CLASS );
 
@@ -343,7 +343,7 @@ void DRC_ENGINE::loadImplicitRules()
                     if( nc->GetDiffPairGap() < nc->GetClearance() )
                     {
                         netclassRule = std::make_shared<DRC_RULE>();
-                        netclassRule->m_Name = wxString::Format( _( "netclass '%s' (diff pair)" ),
+                        netclassRule->m_Name = wxString::Format( _( "netclass '%s' diff pair" ),
                                                                  nc->GetDiffPairGapParent()->GetHumanReadableName() );
                         netclassRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::NET_CLASS );
 
@@ -396,7 +396,7 @@ void DRC_ENGINE::loadImplicitRules()
                 if( nc->HasuViaDiameter() )
                 {
                     std::shared_ptr<DRC_RULE> netclassRule = std::make_shared<DRC_RULE>();
-                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' (uvia)" ),
+                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' uvia" ),
                                                              nc->GetuViaDiameterParent()->GetHumanReadableName() );
                     netclassRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::NET_CLASS );
 
@@ -413,7 +413,7 @@ void DRC_ENGINE::loadImplicitRules()
                 if( nc->HasuViaDrill() )
                 {
                     std::shared_ptr<DRC_RULE> netclassRule = std::make_shared<DRC_RULE>();
-                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' (uvia)" ),
+                    netclassRule->m_Name = wxString::Format( _( "netclass '%s' uvia" ),
                                                              nc->GetuViaDrillParent()->GetHumanReadableName() );
                     netclassRule->SetImplicitSource( DRC_IMPLICIT_SOURCE::NET_CLASS );
 
@@ -675,6 +675,9 @@ void DRC_ENGINE::loadRules( const wxFileName& aPath )
             std::function<bool( wxString* )> resolver =
                     [&]( wxString* token ) -> bool
                     {
+                        if( IsComponentClassSelector( *token ) )
+                            return false;
+
                         return m_board->ResolveTextVar( token, 0 );
                     };
 
@@ -821,7 +824,7 @@ void DRC_ENGINE::InitEngine( const std::shared_ptr<DRC_RULE>& rule )
         throw original_parse_error;
     }
 
-    for( int ii = DRCE_FIRST; ii < DRCE_LAST; ++ii )
+    for( int ii = DRCE_FIRST; ii <= DRCE_LAST; ++ii )
         m_errorLimits[ii] = ERROR_LIMIT;
 
     m_rulesValid = true;
@@ -1923,6 +1926,21 @@ DRC_CONSTRAINT DRC_ENGINE::EvalRules( DRC_CONSTRAINT_T aConstraintType, const BO
             for( DRC_ENGINE_CONSTRAINT* rule : *it->second )
                 processConstraint( rule );
         }
+
+        // DIFF_PAIR_GAP_CONSTRAINT must also respect CLEARANCE_CONSTRAINTs.
+        if( aConstraintType == DIFF_PAIR_GAP_CONSTRAINT )
+        {
+            DRC_CONSTRAINT clearanceConstraint = EvalRules( CLEARANCE_CONSTRAINT, a, b, aLayer, nullptr );
+
+            REPORT( "" )
+            REPORT( wxString::Format( _( "Resolved minimum clearance: %s." ),
+                                      MessageTextFromValue( clearanceConstraint.m_Value.Min() ) ) )
+
+            if( constraint.m_Value.Min() < clearanceConstraint.m_Value.Min() )
+                constraint.m_Value.SetMin( clearanceConstraint.m_Value.Min() );
+
+            return constraint;
+        }
     }
 
     if( constraint.GetParentRule() && !constraint.GetParentRule()->IsImplicit() )
@@ -2060,21 +2078,6 @@ DRC_CONSTRAINT DRC_ENGINE::EvalRules( DRC_CONSTRAINT_T aConstraintType, const BO
                 constraint.SetName( _( "board minimum" ) );
                 constraint.m_Value.SetMin( m_designSettings->m_MinClearance );
             }
-        }
-
-        return constraint;
-    }
-    else if( aConstraintType == DIFF_PAIR_GAP_CONSTRAINT )
-    {
-        REPORT( "" )
-        REPORT( wxString::Format( _( "Board minimum clearance: %s." ),
-                                  MessageTextFromValue( m_designSettings->m_MinClearance ) ) )
-
-        if( constraint.m_Value.Min() < m_designSettings->m_MinClearance )
-        {
-            constraint.SetParentRule( nullptr );
-            constraint.SetName( _( "board minimum" ) );
-            constraint.m_Value.SetMin( m_designSettings->m_MinClearance );
         }
 
         return constraint;
@@ -2277,6 +2280,14 @@ bool DRC_ENGINE::IsErrorLimitExceeded( int error_code )
 }
 
 
+int DRC_ENGINE::GetErrorLimit( int error_code )
+{
+    assert( error_code >= 0 && error_code <= DRCE_LAST );
+    std::lock_guard<std::mutex> lock( m_errorLimitsMutex );
+    return std::max( 0, m_errorLimits[ error_code ] );
+}
+
+
 void DRC_ENGINE::ReportViolation( const std::shared_ptr<DRC_ITEM>& aItem, const VECTOR2I& aPos,
                                   int aMarkerLayer, const std::function<void( PCB_MARKER* )>& aPathGenerator )
 {
@@ -2406,23 +2417,27 @@ bool DRC_ENGINE::QueryWorstConstraint( DRC_CONSTRAINT_T aConstraintId, DRC_CONST
 }
 
 
-bool DRC_ENGINE::HasUserDefinedPhysicalConstraint()
+bool DRC_ENGINE::HasConditionalConstraint( DRC_CONSTRAINT_T aConstraintId )
 {
-    for( DRC_CONSTRAINT_T type : { PHYSICAL_CLEARANCE_CONSTRAINT, PHYSICAL_HOLE_CLEARANCE_CONSTRAINT } )
-    {
-        auto it = m_constraintMap.find( type );
+    auto it = m_constraintMap.find( aConstraintId );
 
-        if( it != m_constraintMap.end() )
+    if( it != m_constraintMap.end() )
+    {
+        for( DRC_ENGINE_CONSTRAINT* c : *it->second )
         {
-            for( DRC_ENGINE_CONSTRAINT* c : *it->second )
-            {
-                if( c->condition && c->parentRule && !c->parentRule->IsImplicit() )
-                    return true;
-            }
+            if( c->condition && c->parentRule && !c->parentRule->IsImplicit() )
+                return true;
         }
     }
 
     return false;
+}
+
+
+bool DRC_ENGINE::HasUserDefinedPhysicalConstraint()
+{
+    return HasConditionalConstraint( PHYSICAL_CLEARANCE_CONSTRAINT )
+           || HasConditionalConstraint( PHYSICAL_HOLE_CLEARANCE_CONSTRAINT );
 }
 
 
@@ -2916,6 +2931,7 @@ std::vector<BOARD_ITEM*> DRC_ENGINE::GetItemsMatchingCondition( const wxString& 
         case PCB_NETINFO_T:
         case PCB_GENERATOR_T:
         case PCB_GROUP_T:
+        case PCB_CONSTRAINT_T:
             skippedItems++;
             continue;
 
@@ -2973,8 +2989,7 @@ std::vector<BOARD_ITEM*> DRC_ENGINE::GetItemsMatchingRule( const std::shared_ptr
     if( !m_board || !aRule )
         return matches;
 
-    const wxString        condition = aRule->m_Condition ? aRule->m_Condition->GetExpression() : wxString();
-    const bool            requiresPairwise = condition.Contains( wxS( "B." ) );
+    const bool requiresPairwise = aRule->m_Condition && aRule->m_Condition->RequiresPairItems();
     std::set<BOARD_ITEM*> matchedItems;
 
     if( std::shared_ptr<CONNECTIVITY_DATA> connectivity = m_board->GetConnectivity() )

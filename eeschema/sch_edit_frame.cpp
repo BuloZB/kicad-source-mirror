@@ -80,7 +80,9 @@
 #include <tool/zoom_tool.h>
 #include <tools/sch_actions.h>
 #include <tools/sch_align_tool.h>
+#include <tools/ee_graphic_tool.h>
 #include <tools/ee_grid_helper.h>
+#include <tools/ee_graphic_tool.h>
 #include <tools/sch_inspection_tool.h>
 #include <tools/sch_point_editor.h>
 #include <tools/sch_design_block_control.h>
@@ -413,7 +415,6 @@ SCH_EDIT_FRAME::SCH_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
             } );
 
     resolveCanvasType();
-    SwitchCanvas( m_canvasType );
 
     GetCanvas()->GetGAL()->SetAxesEnabled( false );
 
@@ -704,6 +705,7 @@ void SCH_EDIT_FRAME::setupTools()
     m_toolManager->RegisterTool( new SCH_SELECTION_TOOL );
     m_toolManager->RegisterTool( new PICKER_TOOL );
     m_toolManager->RegisterTool( new SCH_DRAWING_TOOLS );
+    m_toolManager->RegisterTool( new EE_GRAPHIC_TOOL );
     m_toolManager->RegisterTool( new SCH_LINE_WIRE_BUS_TOOL );
     m_toolManager->RegisterTool( new SCH_MOVE_TOOL );
     m_toolManager->RegisterTool( new SCH_ALIGN_TOOL );
@@ -1438,7 +1440,7 @@ void SCH_EDIT_FRAME::OnLoadFile( wxCommandEvent& event )
     wxString filename = GetFileFromHistory( event.GetId(), _( "Schematic" ) );
 
     if( !filename.IsEmpty() )
-        OpenProjectFiles( std::vector<wxString>( 1, filename ) );
+        OpenProjectFiles( std::vector<wxString>( 1, filename ), KICTL_KICAD_ONLY );
 }
 
 
@@ -1501,7 +1503,7 @@ void SCH_EDIT_FRAME::LoadProject()
 
     if( dlg.ShowModal() != wxID_CANCEL )
     {
-        OpenProjectFiles( std::vector<wxString>( 1, dlg.GetPath() ) );
+        OpenProjectFiles( std::vector<wxString>( 1, dlg.GetPath() ), KICTL_KICAD_ONLY );
         m_mruPath = Prj().GetProjectPath();
     }
 

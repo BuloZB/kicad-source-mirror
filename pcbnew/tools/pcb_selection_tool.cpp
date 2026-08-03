@@ -52,6 +52,7 @@ using namespace std::placeholders;
 #include <tool/tool_manager.h>
 #include <tools/tool_event_utils.h>
 #include <tools/pcb_point_editor.h>
+#include <tools/constraint_edit_tool.h>
 #include <tools/pcb_selection_tool.h>
 #include <tools/pcb_actions.h>
 #include <tools/board_inspection_tool.h>
@@ -241,6 +242,7 @@ PCB_SELECTION_TOOL::PCB_SELECTION_TOOL() :
     m_filter.keepouts    = true;
     m_filter.dimensions  = true;
     m_filter.points      = true;
+    m_filter.gridItems   = true;
     m_filter.otherItems  = true;
 }
 
@@ -448,6 +450,21 @@ int PCB_SELECTION_TOOL::Main( const TOOL_EVENT& aEvent )
             {
                 m_disambiguateTimer.Stop();
 
+                // A click on a geometric-constraint badge selects that constraint instead of a
+                // board item (the badges have no selectable geometry of their own); a click that
+                // misses every badge clears any badge selection.
+                if( CONSTRAINT_EDIT_TOOL* constraintTool =
+                            m_toolMgr->GetTool<CONSTRAINT_EDIT_TOOL>() )
+                {
+                    if( constraintTool->SelectConstraintAt( evt->Position() ) )
+                    {
+                        m_canceledMenu = false;
+                        continue;
+                    }
+
+                    constraintTool->ClearConstraintSelection();
+                }
+
                 // Single click? Select single object
                 if( m_highlight_modifier && brd_editor )
                 {
@@ -503,6 +520,13 @@ int PCB_SELECTION_TOOL::Main( const TOOL_EVENT& aEvent )
             if( frame && frame->IsType( FRAME_FOOTPRINT_VIEWER ) )
             {
                 evt->SetPassEvent();
+                continue;
+            }
+
+            // A double-click on a constraint badge edits that relation's value.
+            if( CONSTRAINT_EDIT_TOOL* constraintTool = m_toolMgr->GetTool<CONSTRAINT_EDIT_TOOL>();
+                constraintTool && constraintTool->EditConstraintAt( evt->Position() ) )
+            {
                 continue;
             }
 
@@ -672,6 +696,12 @@ int PCB_SELECTION_TOOL::Main( const TOOL_EVENT& aEvent )
         {
             m_disambiguateTimer.Stop();
             m_frame->ClearFocus();
+
+            if( CONSTRAINT_EDIT_TOOL* constraintTool = m_toolMgr->GetTool<CONSTRAINT_EDIT_TOOL>();
+                constraintTool && constraintTool->ClearConstraintSelection() )
+            {
+                continue;
+            }
 
             if( !GetSelection().Empty() )
             {
@@ -1528,7 +1558,7 @@ int PCB_SELECTION_TOOL::SelectPolyArea( const TOOL_EVENT& aEvent )
             evt->SetPassEvent( false );
             break;
         }
-        else if(   evt->IsAction( &PCB_ACTIONS::deleteLastPoint )
+        else if(   evt->IsAction( &ACTIONS::deleteLastPoint )
                 || evt->IsAction( &ACTIONS::doDelete )
                 || evt->IsAction( &ACTIONS::undo ) )
         {
@@ -3456,6 +3486,9 @@ static bool itemIsIncludedByFilter( const BOARD_ITEM& aItem, const BOARD& aBoard
         else
             return aFilterOptions.includeItemsOnTechLayers;
 
+    case PCB_GRIDITEM_T:
+        return aFilterOptions.includeItemsOnTechLayers;
+
     case PCB_FIELD_T:
     case PCB_TEXT_T:
     case PCB_TEXTBOX_T:
@@ -3710,6 +3743,17 @@ bool PCB_SELECTION_TOOL::itemPassesFilter( BOARD_ITEM* aItem, bool aMultiSelect,
         {
             if( aRejected )
                 aRejected->points = true;
+
+            return false;
+        }
+
+        break;
+
+    case PCB_GRIDITEM_T:
+        if( !m_filter.gridItems )
+        {
+            if( aRejected )
+                aRejected->gridItems = true;
 
             return false;
         }
@@ -4112,8 +4156,15 @@ bool PCB_SELECTION_TOOL::Selectable( const BOARD_ITEM* aItem, bool checkVisibili
 
         break;
 
+    case PCB_GRIDITEM_T:
+        if( !board()->IsElementVisible( LAYER_GRIDITEMS ) )
+            return false;
+
+        break;
+
     // These are not selectable
     case PCB_NETINFO_T:
+    case PCB_CONSTRAINT_T:   // geometry-free, never rendered or hit-tested (#2329)
     case NOT_USED:
     case TYPE_NOT_INIT:
         return false;

@@ -233,6 +233,11 @@ void PCB_SHAPE::Serialize( google::protobuf::Any &aContainer ) const
     EDA_SHAPE::Serialize( any );
     any.UnpackTo( msg.mutable_shape() );
 
+    if( FOOTPRINT* parent = GetParentFootprint() )
+        msg.mutable_parent()->set_value( parent->m_Uuid.AsStdString() );
+    else if( const BOARD* board = GetBoard() )
+        msg.mutable_parent()->set_value( board->m_Uuid.AsStdString() );
+
     // TODO m_hasSolderMask and m_solderMaskMargin
 
     aContainer.PackFrom( msg );
@@ -1471,6 +1476,20 @@ double PCB_SHAPE::ViewGetLOD( int aLayer, const KIGFX::VIEW* aView ) const
         }
     }
 
+    if( aLayer == LAYER_CONSTRAINT_SHADOW )
+    {
+        // Shadow always appended gate draw here on live constrained-item set not in
+        // ViewGetLayers which caches
+        if( !renderSettings.GetConstrainedItems().count( m_Uuid ) )
+            return LOD_HIDE;
+
+        if( !aView->IsLayerVisibleCached( m_layer ) )
+            return LOD_HIDE;
+
+        if( renderSettings.GetHighContrast() && m_layer != renderSettings.GetPrimaryHighContrastLayer() )
+            return LOD_HIDE;
+    }
+
     if( FOOTPRINT* parent = GetParentFootprint() )
     {
         PCB_LAYER_ID checkLayer = m_layer;
@@ -1492,7 +1511,7 @@ double PCB_SHAPE::ViewGetLOD( int aLayer, const KIGFX::VIEW* aView ) const
 std::vector<int> PCB_SHAPE::ViewGetLayers() const
 {
     std::vector<int> layers;
-    layers.reserve( 4 );
+    layers.reserve( 5 );
 
     layers.push_back( GetLayer() );
 
@@ -1511,6 +1530,9 @@ std::vector<int> PCB_SHAPE::ViewGetLayers() const
 
     if( IsLocked() || ( GetParentFootprint() && GetParentFootprint()->IsLocked() ) )
         layers.push_back( LAYER_LOCKED_ITEM_SHADOW );
+
+    // Always advertise constraint-shadow layer ViewGetLOD gates draw by constrained state
+    layers.push_back( LAYER_CONSTRAINT_SHADOW );
 
     return layers;
 }
@@ -1612,7 +1634,7 @@ const BOX2I PCB_SHAPE::ViewBBox() const
 }
 
 
-std::shared_ptr<SHAPE> PCB_SHAPE::GetEffectiveShape( PCB_LAYER_ID aLayer, FLASHING aFlash ) const
+std::shared_ptr<SHAPE> PCB_SHAPE::GetEffectiveShape( PCB_LAYER_ID aLayer, FLASHING, DRC_CONSTRAINT_T ) const
 {
     return std::make_shared<SHAPE_COMPOUND>( MakeEffectiveShapes() );
 }

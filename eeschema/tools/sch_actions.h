@@ -99,7 +99,6 @@ public:
     static TOOL_ACTION undoLastSegment;
     static TOOL_ACTION switchSegmentPosture;
     static TOOL_ACTION drawRuleArea;
-    static TOOL_ACTION deleteLastPoint;
     static TOOL_ACTION closeOutline;
 
     // Symbol Tools
@@ -164,6 +163,8 @@ public:
     static TOOL_ACTION updateSymbols;
     static TOOL_ACTION changeSymbol;
     static TOOL_ACTION updateSymbol;
+    static TOOL_ACTION setVariantSymbol;
+    static TOOL_ACTION clearVariantSymbol;
     static TOOL_ACTION assignFootprints;
     static TOOL_ACTION assignNetclass;
     static TOOL_ACTION findNetInInspector;
@@ -316,6 +317,7 @@ public:
     static TOOL_ACTION toggleSimSidePanel;
     static TOOL_ACTION toggleLegend;
     static TOOL_ACTION toggleDottedSecondary;
+    static TOOL_ACTION toggleSmithChart;
     static TOOL_ACTION toggleDarkModePlots;
     static TOOL_ACTION simAnalysisProperties;
     static TOOL_ACTION runSimulation;

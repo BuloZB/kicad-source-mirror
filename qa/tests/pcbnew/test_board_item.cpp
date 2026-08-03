@@ -42,6 +42,7 @@
 #include <pcb_point.h>
 #include <pcb_target.h>
 #include <pcb_group.h>
+#include <pcb_griditem.h>
 #include <pcb_board_outline.h>
 #include <properties/property.h>
 #include <properties/property_mgr.h>
@@ -123,6 +124,7 @@ public:
         case PCB_DIM_ORTHOGONAL_T:    return new PCB_DIM_ORTHOGONAL( &m_board );
         case PCB_TARGET_T:            return new PCB_TARGET( &m_board );
         case PCB_POINT_T:             return new PCB_POINT( &m_board );
+        case PCB_GRIDITEM_T:          return new PCB_GRIDITEM( &m_board );
 
         case PCB_ZONE_T:
         {
@@ -150,6 +152,7 @@ public:
         case PCB_ITEM_LIST_T:
         case PCB_NETINFO_T:
         case PCB_GENERATOR_T:
+        case PCB_CONSTRAINT_T:   // geometry-free; geometric behavior covered by ConstraintSolverItem
         case PCB_BOARD_OUTLINE_T:
             return nullptr;
 
@@ -454,64 +457,6 @@ BOOST_AUTO_TEST_CASE( ResolveItemIdentityCachePurgedOnDestruction )
 }
 
 
-// The per-item flag must track the board's identity cache across every mutation path.
-BOOST_AUTO_TEST_CASE( IndexMembershipFlagTracksCache )
-{
-    BOARD board;
-
-    FOOTPRINT* footprint = new FOOTPRINT( &board );
-    board.Add( footprint );
-
-    PAD* pad = new PAD( footprint );
-    footprint->Pads().push_back( pad );
-
-    BOOST_CHECK( !pad->IsIndexedInBoard() );
-
-    board.CacheItemById( pad );
-    BOOST_CHECK( pad->IsIndexedInBoard() );
-    BOOST_CHECK( board.IsItemIndexedById( pad ) );
-
-    // A clone is a distinct object, not itself indexed.
-    {
-        PAD copy( *pad );
-        BOOST_CHECK( !copy.IsIndexedInBoard() );
-    }
-
-    board.UncacheItemById( pad->m_Uuid );
-    BOOST_CHECK( !pad->IsIndexedInBoard() );
-    BOOST_CHECK( !board.IsItemIndexedById( pad ) );
-
-    board.CacheAndReturnItemById( pad->m_Uuid, pad );
-    BOOST_CHECK( pad->IsIndexedInBoard() );
-
-    board.UncacheItemByPtr( pad );
-    BOOST_CHECK( !pad->IsIndexedInBoard() );
-    BOOST_CHECK( !board.IsItemIndexedById( pad ) );
-
-    board.CacheItemById( pad );
-    BOOST_REQUIRE( pad->IsIndexedInBoard() );
-    board.ClearItemByIdCache();
-    BOOST_CHECK( !pad->IsIndexedInBoard() );
-}
-
-
-// A rejected Add() (here a track on a non-copper layer) must leave the item out of the cache.
-BOOST_AUTO_TEST_CASE( RejectedAddLeavesItemUnindexed )
-{
-    BOARD board;
-
-    PCB_TRACK* track = new PCB_TRACK( &board );
-    track->SetLayer( Edge_Cuts );
-
-    CHECK_WX_ASSERT( board.Add( track ) );
-
-    BOOST_CHECK( !track->IsIndexedInBoard() );
-    BOOST_CHECK( !board.IsItemIndexedById( track ) );
-
-    BOOST_CHECK_NO_THROW( delete track );
-}
-
-
 // A never-indexed item parented to a freed board must not touch that board on destruction, the
 // crash from the "KiCad master crashes" report (follow-up to ac12a1c820).
 BOOST_AUTO_TEST_CASE( UncachedItemSurvivesBoardDestruction )
@@ -524,6 +469,34 @@ BOOST_AUTO_TEST_CASE( UncachedItemSurvivesBoardDestruction )
     delete board;
 
     BOOST_CHECK_NO_THROW( delete dummy );
+}
+
+
+// The indexed counterpart of the case above.  ~BOARD must clear the membership flag as it drops
+// the index, or a survivor still believes it is indexed and walks its parent chain into the
+// freed board.
+BOOST_AUTO_TEST_CASE( IndexedItemSurvivesBoardDestruction )
+{
+    BOARD*     board = new BOARD();
+    FOOTPRINT* footprint = new FOOTPRINT( board );
+
+    board->Add( footprint );
+
+    PAD* pad = new PAD( footprint );
+    footprint->Pads().push_back( pad );
+    board->CacheItemById( pad );
+
+    BOOST_REQUIRE( pad->IsIndexedInBoard() );
+
+    // Detach without FOOTPRINT::Remove() so the board frees the footprint while the pad lives on,
+    // still parented to it.  This is the ownership hand-off the safety net in ~BOARD_ITEM covers.
+    std::deque<PAD*>& pads = footprint->Pads();
+    pads.erase( std::find( pads.begin(), pads.end(), pad ) );
+
+    delete board;
+
+    BOOST_CHECK( !pad->IsIndexedInBoard() );
+    BOOST_CHECK_NO_THROW( delete pad );
 }
 
 

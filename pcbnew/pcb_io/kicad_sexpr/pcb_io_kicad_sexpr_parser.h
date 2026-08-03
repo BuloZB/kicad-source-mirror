@@ -35,6 +35,8 @@
 #include <pcb_lexer.h>
 #include <kiid.h>
 #include <math/box2.h>
+#include <optional>
+#include <constraints/pcb_constraint.h>
 #include <string_any_map.h>
 #include <padstack.h>
 #include <pcb_io/common/plugin_common_layer_mapping.h>
@@ -64,6 +66,7 @@ class FOOTPRINT;
 class PCB_GROUP;
 class PCB_POINT;
 class PCB_TARGET;
+class PCB_GRIDITEM;
 class PCB_VIA;
 class ZONE;
 struct ZONE_LAYER_PROPERTIES;
@@ -169,6 +172,18 @@ private:
         STRING_ANY_MAP properties;
     };
 
+    /// Deferred constraint, resolved against the parsed items once the whole file is read,
+    /// mirroring GROUP_INFO (members reference items by KIID).
+    struct CONSTRAINT_INFO
+    {
+        BOARD_ITEM*                    parent = nullptr;
+        KIID                           uuid;
+        PCB_CONSTRAINT_TYPE            type = PCB_CONSTRAINT_TYPE::UNDEFINED;
+        std::vector<CONSTRAINT_MEMBER> members;
+        std::optional<double>          value;
+        bool                           driving = true;
+    };
+
     ///< Convert net code using the mapping table if available,
     ///< otherwise returns unchanged net code if < 0 or if it's out of range
     inline int getNetCode( int aNetCode )
@@ -263,17 +278,19 @@ private:
 
     void        parsePadstack( PAD* aPad );
 
-    PCB_ARC*    parseARC();
-    PCB_TRACK*  parsePCB_TRACK();
-    PCB_VIA*    parsePCB_VIA();
-    void        parseViastack( PCB_VIA* aVia );
-    ZONE*       parseZONE( BOARD_ITEM_CONTAINER* aParent );
-    PCB_TARGET* parsePCB_TARGET();
-    PCB_POINT*  parsePCB_POINT();
-    BOARD*      parseBOARD();
-    void        parseGROUP_members( GROUP_INFO& aGroupInfo );
-    void        parseGROUP( BOARD_ITEM* aParent );
-    void        parseGENERATOR( BOARD_ITEM* aParent );
+    PCB_ARC*      parseARC();
+    PCB_TRACK*    parsePCB_TRACK();
+    PCB_VIA*      parsePCB_VIA();
+    void          parseViastack( PCB_VIA* aVia );
+    ZONE*         parseZONE( BOARD_ITEM_CONTAINER* aParent );
+    PCB_TARGET*   parsePCB_TARGET();
+    PCB_POINT*    parsePCB_POINT();
+    PCB_GRIDITEM* parsePCB_GRIDITEM();
+    BOARD*        parseBOARD();
+    void          parseGROUP_members( GROUP_INFO& aGroupInfo );
+    void          parseGROUP( BOARD_ITEM* aParent );
+    void          parseCONSTRAINT( BOARD_ITEM* aParent );
+    void          parseGENERATOR( BOARD_ITEM* aParent );
 
     // Parse a board, but do not replace PARSE_ERROR with FUTURE_FORMAT_ERROR automatically.
     BOARD*      parseBOARD_unchecked();
@@ -433,6 +450,7 @@ private:
      * lists.
      */
     void resolveGroups( BOARD_ITEM* aParent );
+    void resolveConstraints( BOARD_ITEM* aParent );
 
     ///< The type of progress bar timeout
     using TIMEOUT = std::chrono::milliseconds;
@@ -465,8 +483,9 @@ private:
     TIME_PT             m_lastProgressTime;  ///< for progress reporting
     unsigned            m_lineCount;         ///< for progress reporting
 
-    std::vector<GROUP_INFO>     m_groupInfos;
-    std::vector<GENERATOR_INFO> m_generatorInfos;
+    std::vector<GROUP_INFO>      m_groupInfos;
+    std::vector<GENERATOR_INFO>  m_generatorInfos;
+    std::vector<CONSTRAINT_INFO> m_constraintInfos;
 
     std::function<bool( wxString aTitle, int aIcon, wxString aMsg, wxString aAction )> m_queryUserCallback;
 

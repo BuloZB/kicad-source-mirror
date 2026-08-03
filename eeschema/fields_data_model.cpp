@@ -17,6 +17,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+#include <set>
+
 #include <nlohmann/json.hpp>
 #include <wx/string.h>
 #include <wx/debug.h>
@@ -28,15 +31,16 @@
 #include <sch_commit.h>
 #include <sch_screen.h>
 #include <template_fieldnames.h>
+#include <sch_sheet_path.h>
 #include "string_utils.h"
 
 #include "fields_data_model.h"
 
 
-/**      
+/**
  * Cell renderer that shows the expanded result of text variables (e.g. "${VALUE}" is
- * displayed as "10K").  The actual cell still stores the raw variable so it can be                                   
- * edited directly.                                                                                                   
+ * displayed as "10K").  The actual cell still stores the raw variable so it can be
+ * edited directly.
  */
 class GRID_CELL_RESOLVED_TEXT_RENDERER : public wxGridCellStringRenderer
 {
@@ -89,153 +93,6 @@ static KIID_PATH makeDataStoreKey( const SCH_SHEET_PATH& aSheetPath, const SCH_S
     KIID_PATH path = aSheetPath.Path();
     path.push_back( aSymbol.m_Uuid );
     return path;
-}
-
-
-wxString VIEW_CONTROLS_GRID_DATA_MODEL::GetColLabelValue( int aCol )
-{
-    switch( aCol )
-    {
-    case DISPLAY_NAME_COLUMN: return _( "Field" );
-    case LABEL_COLUMN:        return m_forBOM ? _( "BOM Name" ) : _( "Label" );
-    case SHOW_FIELD_COLUMN:   return _( "Include" );
-    case GROUP_BY_COLUMN:     return _( "Group By" );
-    default:                  return wxT( "unknown column" );
-    };
-}
-
-
-wxString VIEW_CONTROLS_GRID_DATA_MODEL::GetValue( int aRow, int aCol )
-{
-    wxCHECK( aRow < GetNumberRows(), wxT( "bad row!" ) );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    switch( aCol )
-    {
-    case DISPLAY_NAME_COLUMN:
-        for( FIELD_T fieldId : MANDATORY_FIELDS )
-        {
-            if( GetDefaultFieldName( fieldId, !DO_TRANSLATE ) == rowData.name )
-                return GetDefaultFieldName( fieldId, DO_TRANSLATE );
-        }
-
-        return rowData.name;
-
-    case LABEL_COLUMN:
-        return rowData.label;
-
-    default:
-        // we can't assert here because wxWidgets sometimes calls this without checking
-        // the column type when trying to see if there's an overflow
-        return wxT( "bad wxWidgets!" );
-    }
-}
-
-
-bool VIEW_CONTROLS_GRID_DATA_MODEL::GetValueAsBool( int aRow, int aCol )
-{
-    wxCHECK( aRow < GetNumberRows(), false );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    switch( aCol )
-    {
-    case SHOW_FIELD_COLUMN: return rowData.show;
-    case GROUP_BY_COLUMN:   return rowData.groupBy;
-
-    default:
-        wxFAIL_MSG( wxString::Format( wxT( "column %d doesn't hold a bool value" ), aCol ) );
-        return false;
-    }
-}
-
-
-void VIEW_CONTROLS_GRID_DATA_MODEL::SetValue( int aRow, int aCol, const wxString &aValue )
-{
-    wxCHECK( aRow < GetNumberRows(), /*void*/ );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    switch( aCol )
-    {
-    case DISPLAY_NAME_COLUMN:
-        // Not editable
-        break;
-
-    case LABEL_COLUMN:
-        rowData.label = aValue;
-        break;
-
-    default:
-        wxFAIL_MSG( wxString::Format( wxT( "column %d doesn't hold a string value" ), aCol ) );
-    }
-
-    GetView()->Refresh();
-}
-
-
-void VIEW_CONTROLS_GRID_DATA_MODEL::SetValueAsBool( int aRow, int aCol, bool aValue )
-{
-    wxCHECK( aRow < GetNumberRows(), /*void*/ );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    switch( aCol )
-    {
-    case SHOW_FIELD_COLUMN: rowData.show = aValue;    break;
-    case GROUP_BY_COLUMN:   rowData.groupBy = aValue; break;
-
-    default:
-        wxFAIL_MSG( wxString::Format( wxT( "column %d doesn't hold a bool value" ), aCol ) );
-    }
-}
-
-
-void VIEW_CONTROLS_GRID_DATA_MODEL::AppendRow( const wxString& aFieldName, const wxString& aBOMName,
-                                               bool aShow, bool aGroupBy )
-{
-    m_fields.emplace_back( BOM_FIELD{ aFieldName, aBOMName, aShow, aGroupBy } );
-
-    if( wxGrid* grid = GetView() )
-    {
-        wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_APPENDED, 1 );
-        grid->ProcessTableMessage( msg );
-    }
-}
-
-
-void VIEW_CONTROLS_GRID_DATA_MODEL::DeleteRow( int aRow )
-{
-    wxCHECK( aRow >= 0 && aRow < GetNumberRows(), /* void */ );
-
-    m_fields.erase( m_fields.begin() + aRow );
-
-    if( wxGrid* grid = GetView() )
-    {
-        wxGridTableMessage msg( this, wxGRIDTABLE_NOTIFY_ROWS_DELETED, aRow, 1 );
-        grid->ProcessTableMessage( msg );
-    }
-}
-
-
-wxString VIEW_CONTROLS_GRID_DATA_MODEL::GetCanonicalFieldName( int aRow )
-{
-    wxCHECK( aRow >= 0 && aRow < GetNumberRows(), wxEmptyString );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    return rowData.name;
-}
-
-
-void VIEW_CONTROLS_GRID_DATA_MODEL::SetCanonicalFieldName( int aRow, const wxString& aName )
-{
-    wxCHECK( aRow >= 0 && aRow < GetNumberRows(), /* void */ );
-
-    BOM_FIELD& rowData = m_fields[aRow];
-
-    rowData.name = aName;
 }
 
 
@@ -469,14 +326,34 @@ wxGridCellAttr* FIELDS_EDITOR_GRID_DATA_MODEL::GetAttr( int aRow, int aCol, wxGr
                 {
                     needsVariantHighlight = true;
 
-                    // Use a subtle highlight color that works in both light and dark themes
+                    bool isPriority2 = false;
+
+                    if( const SCH_SYMBOL* sym = ref.GetSymbol() )
+                    {
+                        auto variantData = sym->GetVariant( ref.GetSheetPath(),
+                                                            m_currentVariant );
+
+                        if( variantData
+                            && variantData->m_SymbolOverride
+                            && !variantData->m_Fields.count( fieldName ) )
+                        {
+                            isPriority2 = true;
+                        }
+                    }
+
                     wxColour bg = wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW );
                     bool     isDark = ( bg.Red() + bg.Green() + bg.Blue() ) < 384;
 
-                    if( isDark )
-                        highlightColor = wxColour( 80, 80, 40 );   // Dark gold/brown
+                    if( isPriority2 )
+                    {
+                        highlightColor = isDark ? wxColour( 40, 60, 80 )
+                                                : wxColour( 220, 235, 255 );
+                    }
                     else
-                        highlightColor = wxColour( 255, 255, 200 ); // Light yellow
+                    {
+                        highlightColor = isDark ? wxColour( 80, 80, 40 )
+                                                : wxColour( 255, 255, 200 );
+                    }
 
                     break;
                 }
@@ -671,41 +548,32 @@ void FIELDS_EDITOR_GRID_DATA_MODEL::SetValue( int aRow, int aCol, const wxString
     if( aValue == INDETERMINATE_STATE )
         return;
 
-    DATA_MODEL_ROW& rowGroup = m_rows[aRow];
+    const DATA_MODEL_ROW& rowGroup = m_rows[aRow];
+    const wxString&       fieldName = m_cols[aCol].m_fieldName;
 
-    const SCH_SYMBOL* sharedSymbol = nullptr;
-    bool isSharedInstance = false;
+    std::set<const SCH_SYMBOL*> editedSymbols;
 
     for( const SCH_REFERENCE& ref : rowGroup.m_Refs )
     {
-        // Check to see if the symbol associated with this row has more than one instance.
-        if( const SCH_SYMBOL* symbol = ref.GetSymbol() )
-        {
-            isSharedInstance = ref.GetSheetPath().IsSharedPath();
-            sharedSymbol = symbol;
-        }
+        editedSymbols.insert( ref.GetSymbol() );
 
         KIID_PATH key = makeDataStoreKey( ref.GetSheetPath(), *ref.GetSymbol() );
-        m_dataStore[key][m_cols[aCol].m_fieldName] = aValue;
+        m_dataStore[key][fieldName] = aValue;
     }
 
-    // Update all of the other instances for the shared symbol as required.
-    if( isSharedInstance
-      && ( ( rowGroup.m_Flag == GROUP_SINGLETON ) || ( rowGroup.m_Flag == CHILD_ITEM ) ) )
+    // ApplyData walks every path a symbol is reachable through, so an edit to storage those
+    // paths have in common must also reach the ones the current scope and filter hide
+    if( storageIsSharedAcrossPaths( fieldName ) )
     {
-        for( DATA_MODEL_ROW& row : m_rows )
+        for( unsigned ii = 0; ii < m_symbolsList.GetCount(); ++ii )
         {
-            if( row.m_ItemNumber == aRow + 1 )
+            const SCH_REFERENCE& ref = m_symbolsList[ii];
+
+            if( !editedSymbols.contains( ref.GetSymbol() ) )
                 continue;
 
-            for( const SCH_REFERENCE& ref : row.m_Refs )
-            {
-                if( ref.GetSymbol() != sharedSymbol )
-                    continue;
-
-                KIID_PATH key = makeDataStoreKey( ref.GetSheetPath(), *ref.GetSymbol() );
-                m_dataStore[key][m_cols[aCol].m_fieldName] = aValue;
-            }
+            KIID_PATH key = makeDataStoreKey( ref.GetSheetPath(), *ref.GetSymbol() );
+            m_dataStore[key][fieldName] = aValue;
         }
     }
 
@@ -939,6 +807,17 @@ bool FIELDS_EDITOR_GRID_DATA_MODEL::isAttribute( const wxString& aFieldName )
     return aFieldName == wxS( "${DNP}" ) || aFieldName == wxS( "${EXCLUDE_FROM_BOARD}" )
            || aFieldName == wxS( "${EXCLUDE_FROM_BOM}" ) || aFieldName == wxS( "${EXCLUDE_FROM_POS_FILES}" )
            || aFieldName == wxS( "${EXCLUDE_FROM_SIM}" );
+}
+
+
+bool FIELDS_EDITOR_GRID_DATA_MODEL::storageIsSharedAcrossPaths( const wxString& aFieldName ) const
+{
+    // Variant edits are kept on the symbol instance, but SCH_REFERENCE has no variant form of
+    // the board exclusion so that one always lands on the symbol
+    if( aFieldName == wxS( "${EXCLUDE_FROM_BOARD}" ) )
+        return true;
+
+    return m_currentVariant.IsEmpty();
 }
 
 
@@ -1563,6 +1442,9 @@ wxString FIELDS_EDITOR_GRID_DATA_MODEL::Export( const BOM_FMT_PRESET& settings )
     // No shown columns
     if( last_col == -1 )
         return out;
+
+    if( settings.includeByteOrderMark )
+        out.Append( wxString::FromUTF8( "\xEF\xBB\xBF" ) );
 
     auto formatField =
             [&]( wxString field, bool last ) -> wxString

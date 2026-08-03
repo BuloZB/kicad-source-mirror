@@ -384,6 +384,9 @@ public:
     GROUPS& Groups()                       { return m_groups; }
     const GROUPS& Groups() const           { return m_groups; }
 
+    CONSTRAINTS& Constraints()             { return m_constraints; }
+    const CONSTRAINTS& Constraints() const { return m_constraints; }
+
     PCB_POINTS& Points()                   { return m_points; }
     const PCB_POINTS& Points() const       { return m_points; }
 
@@ -634,6 +637,19 @@ public:
     bool IsLocked() const override
     {
         return ( m_fpStatus & FP_is_LOCKED ) != 0;
+    }
+
+    /// @copydoc BOARD_ITEM::IsLayerAgnostic
+    /// A footprint's children may sit on layers this board has disabled; masking them off would
+    /// break the footprint and lose the contents when those layers are re-enabled.
+    bool IsLayerAgnostic() const override { return true; }
+
+    /// @copydoc BOARD_ITEM::FitsEnabledLayers
+    /// Only the mounting side is judged -- the children are exempt per IsLayerAgnostic, but a
+    /// footprint that names no side at all is malformed and no board can hold it.
+    bool FitsEnabledLayers( const LSET& aEnabledLayers, int aCopperLayerCount ) const override
+    {
+        return GetLayer() == F_Cu || GetLayer() == B_Cu;
     }
 
     /**
@@ -1300,7 +1316,8 @@ public:
 
     // @copydoc BOARD_ITEM::GetEffectiveShape
     std::shared_ptr<SHAPE> GetEffectiveShape( PCB_LAYER_ID aLayer = UNDEFINED_LAYER,
-                                              FLASHING aFlash = FLASHING::DEFAULT ) const override;
+                                              FLASHING aFlash = FLASHING::DEFAULT,
+                                              DRC_CONSTRAINT_T aUsage = NULL_CONSTRAINT ) const override;
 
     EMBEDDED_FILES* GetEmbeddedFiles() override
     {
@@ -1405,6 +1422,7 @@ private:
     std::deque<PAD*>        m_pads;      // Pads, owned by pointer
     std::vector<ZONE*>      m_zones;     // Rule area zones, owned by pointer
     std::deque<PCB_GROUP*>  m_groups;    // Groups, owned by pointer
+    std::deque<PCB_CONSTRAINT*> m_constraints;  // Geometric constraints, owned by pointer
     std::deque<PCB_POINT*>  m_points;    // Points, owned by pointer
 
     TRANSFORM_TRS   m_transform;

@@ -138,7 +138,7 @@ void PCB_TOOL_BASE::doInteractiveItemPlacement( const TOOL_EVENT&        aTool,
 
         if( !evt->IsActivate() && !evt->IsCancelInteractive() )
         {
-            cursorPos = grid.BestSnapAnchor( cursorPos, nullptr );
+            cursorPos = grid.ResolveSnap( cursorPos, nullptr ).position;
         }
         else
         {
@@ -384,6 +384,15 @@ LEADER_MODE PCB_TOOL_BASE::GetAngleSnapMode() const
         return GetAppSettings<PCBNEW_SETTINGS>( "pcbnew" )->m_AngleSnapMode;
     else
         return GetAppSettings<FOOTPRINT_EDITOR_SETTINGS>( "fpedit" )->m_AngleSnapMode;
+}
+
+
+bool PCB_TOOL_BASE::GetAutoConstraints() const
+{
+    if( frame<PCB_BASE_FRAME>()->IsType( FRAME_PCB_EDITOR ) )
+        return GetAppSettings<PCBNEW_SETTINGS>( "pcbnew" )->m_AutoConstraints;
+    else
+        return GetAppSettings<FOOTPRINT_EDITOR_SETTINGS>( "fpedit" )->m_AutoConstraints;
 }
 
 

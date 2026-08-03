@@ -54,7 +54,10 @@
 #include <fields_data_model.h>
 #include <eda_list_dialog.h>
 #include <project_sch.h>
-#include <jobs/job_export_sch_bom.h>
+#include <jobs/job_export_bom.h>
+#include <tools/sch_actions.h>
+#include <tools/sch_selection_tool.h>
+#include <sch_sheet_path.h>
 
 wxDEFINE_EVENT( EDA_EVT_CLOSE_DIALOG_SYMBOL_FIELDS_TABLE, wxCommandEvent );
 
@@ -70,7 +73,9 @@ using SCOPE = FIELDS_EDITOR_GRID_DATA_MODEL::SCOPE;
 enum
 {
     MYID_SELECT_FOOTPRINT = GRIDTRICKS_FIRST_CLIENT_ID,
-    MYID_SHOW_DATASHEET
+    MYID_SHOW_DATASHEET,
+    MYID_SET_VARIANT_SYMBOL,
+    MYID_CLEAR_VARIANT_SYMBOL
 };
 
 class VIEW_CONTROLS_GRID_TRICKS : public GRID_TRICKS
@@ -120,6 +125,27 @@ protected:
             menu.AppendSeparator();
         }
 
+        SCH_EDIT_FRAME* frame = dynamic_cast<SCH_EDIT_FRAME*>( m_dlg->GetParent() );
+
+        if( frame && !frame->Schematic().GetCurrentVariant().IsEmpty() )
+        {
+            int row = m_grid->GetGridCursorRow();
+            std::vector<SCH_REFERENCE> refs = m_dataModel->GetRowReferences( row );
+
+            if( refs.size() == 1 && refs[0].GetSymbol() )
+            {
+                menu.AppendSeparator();
+                menu.Append( MYID_SET_VARIANT_SYMBOL, _( "Set Variant Symbol..." ) );
+
+                const SCH_SYMBOL* sym = refs[0].GetSymbol();
+                wxString variantName = frame->Schematic().GetCurrentVariant();
+                auto variant = sym->GetVariant( refs[0].GetSheetPath(), variantName );
+
+                if( variant && variant->m_SymbolOverride )
+                    menu.Append( MYID_CLEAR_VARIANT_SYMBOL, _( "Clear Variant Symbol" ) );
+            }
+        }
+
         GRID_TRICKS::showPopupMenu( menu, aEvent );
     }
 
@@ -146,6 +172,29 @@ protected:
             wxString datasheet_uri = m_grid->GetCellValue( row, col );
             GetAssociatedDocument( m_dlg, datasheet_uri, &m_dlg->Prj(), PROJECT_SCH::SchSearchS( &m_dlg->Prj() ),
                                    { m_files } );
+        }
+        else if( event.GetId() == MYID_SET_VARIANT_SYMBOL
+                 || event.GetId() == MYID_CLEAR_VARIANT_SYMBOL )
+        {
+            SCH_EDIT_FRAME* frame = dynamic_cast<SCH_EDIT_FRAME*>( m_dlg->GetParent() );
+
+            if( !frame )
+                return;
+
+            std::vector<SCH_REFERENCE> refs = m_dataModel->GetRowReferences( row );
+
+            if( refs.size() != 1 || !refs[0].GetSymbol() )
+                return;
+
+            SCH_SELECTION_TOOL* selTool =
+                    frame->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
+            std::vector<SCH_ITEM*> items = { refs[0].GetSymbol() };
+            selTool->SyncSelection( refs[0].GetSheetPath(), nullptr, items );
+
+            if( event.GetId() == MYID_SET_VARIANT_SYMBOL )
+                frame->GetToolManager()->RunAction( SCH_ACTIONS::setVariantSymbol );
+            else
+                frame->GetToolManager()->RunAction( SCH_ACTIONS::clearVariantSymbol );
         }
         else if( event.GetId() >= GRIDTRICKS_FIRST_SHOWHIDE )
         {
@@ -184,8 +233,8 @@ private:
 };
 
 
-DIALOG_SYMBOL_FIELDS_TABLE::DIALOG_SYMBOL_FIELDS_TABLE( SCH_EDIT_FRAME* parent, JOB_EXPORT_SCH_BOM* aJob ) :
-        DIALOG_SYMBOL_FIELDS_TABLE_BASE( parent ),
+DIALOG_SYMBOL_FIELDS_TABLE::DIALOG_SYMBOL_FIELDS_TABLE( SCH_EDIT_FRAME* parent, JOB_EXPORT_BOM* aJob ) :
+        DIALOG_FIELDS_TABLE( parent ),
         m_currentBomPreset( nullptr ),
         m_lastSelectedBomPreset( nullptr ),
         m_parent( parent ),
@@ -309,6 +358,8 @@ DIALOG_SYMBOL_FIELDS_TABLE::DIALOG_SYMBOL_FIELDS_TABLE( SCH_EDIT_FRAME* parent, 
 
     if( m_job )
         SetTitle( m_job->GetSettingsDialogTitle() );
+    else
+        SetTitle( _( "Symbol Fields Table" ) );
 
     // DIALOG_SHIM needs a unique hash_key because classname will be the same for both job and
     // non-job versions (which have different sizes).
@@ -407,23 +458,6 @@ DIALOG_SYMBOL_FIELDS_TABLE::~DIALOG_SYMBOL_FIELDS_TABLE()
     m_grid->PopEventHandler( true );
 
     // we gave ownership of m_viewControlsDataModel & m_dataModel to the wxGrids...
-}
-
-
-void DIALOG_SYMBOL_FIELDS_TABLE::setSideBarButtonLook( bool aIsLeftPanelCollapsed )
-{
-    // Set bitmap and tooltip according to left panel visibility
-
-    if( aIsLeftPanelCollapsed )
-    {
-        m_sidebarButton->SetBitmap( KiBitmapBundle( BITMAPS::right ) );
-        m_sidebarButton->SetToolTip( _( "Expand left panel" ) );
-    }
-    else
-    {
-        m_sidebarButton->SetBitmap( KiBitmapBundle( BITMAPS::left ) );
-        m_sidebarButton->SetToolTip( _( "Collapse left panel" ) );
-    }
 }
 
 
@@ -598,6 +632,7 @@ bool DIALOG_SYMBOL_FIELDS_TABLE::TransferDataToWindow()
         fmtPreset.fieldDelimiter = m_job->m_fieldDelimiter;
         fmtPreset.keepLineBreaks = m_job->m_keepLineBreaks;
         fmtPreset.keepTabs = m_job->m_keepTabs;
+        fmtPreset.includeByteOrderMark = m_job->m_includeByteOrderMark;
         fmtPreset.refDelimiter = m_job->m_refDelimiter;
         fmtPreset.refRangeDelimiter = m_job->m_refRangeDelimiter;
         fmtPreset.stringDelimiter = m_job->m_stringDelimiter;
@@ -933,24 +968,6 @@ void DIALOG_SYMBOL_FIELDS_TABLE::OnFilterText( wxCommandEvent& aEvent )
 }
 
 
-void DIALOG_SYMBOL_FIELDS_TABLE::OnFilterMouseMoved( wxMouseEvent& aEvent )
-{
-#if defined( __WXOSX__ ) // Doesn't work properly on other ports
-    wxPoint pos = aEvent.GetPosition();
-    wxRect  ctrlRect = m_filter->GetScreenRect();
-    int     buttonWidth = ctrlRect.GetHeight();         // Presume buttons are square
-
-    // TODO: restore cursor when mouse leaves the filter field (or is it a MSW bug?)
-    if( m_filter->IsSearchButtonVisible() && pos.x < buttonWidth )
-        SetCursor( wxCURSOR_ARROW );
-    else if( m_filter->IsCancelButtonVisible() && pos.x > ctrlRect.GetWidth() - buttonWidth )
-        SetCursor( wxCURSOR_ARROW );
-    else
-        SetCursor( wxCURSOR_IBEAM );
-#endif
-}
-
-
 void DIALOG_SYMBOL_FIELDS_TABLE::setScope( SCOPE aScope )
 {
     m_dataModel->SetPath( m_parent->GetCurrentSheet() );
@@ -1228,20 +1245,6 @@ void DIALOG_SYMBOL_FIELDS_TABLE::OnViewControlsCellChanged( wxGridEvent& aEvent 
 }
 
 
-void DIALOG_SYMBOL_FIELDS_TABLE::OnTableValueChanged( wxGridEvent& aEvent )
-{
-    m_grid->ForceRefresh();
-}
-
-
-void DIALOG_SYMBOL_FIELDS_TABLE::OnTableColSize( wxGridSizeEvent& aEvent )
-{
-    aEvent.Skip();
-
-    m_grid->ForceRefresh();
-}
-
-
 void DIALOG_SYMBOL_FIELDS_TABLE::OnRegroupSymbols( wxCommandEvent& aEvent )
 {
     m_dataModel->RebuildRows();
@@ -1352,35 +1355,6 @@ void DIALOG_SYMBOL_FIELDS_TABLE::OnTableRangeSelected( wxGridRangeSelectEvent& a
 }
 
 
-void DIALOG_SYMBOL_FIELDS_TABLE::OnSizeViewControlsGrid( wxSizeEvent& event )
-{
-    const wxString& showColLabel = m_viewControlsGrid->GetColLabelValue( SHOW_FIELD_COLUMN );
-    const wxString& groupByColLabel = m_viewControlsGrid->GetColLabelValue( GROUP_BY_COLUMN );
-    int             showColWidth = KIUI::GetTextSize( showColLabel, m_viewControlsGrid ).x + COLUMN_MARGIN;
-    int             groupByColWidth = KIUI::GetTextSize( groupByColLabel, m_viewControlsGrid ).x + COLUMN_MARGIN;
-    int             remainingWidth = m_viewControlsGrid->GetSize().GetX() - showColWidth - groupByColWidth;
-
-    m_viewControlsGrid->SetColSize( showColWidth, SHOW_FIELD_COLUMN );
-    m_viewControlsGrid->SetColSize( groupByColWidth, GROUP_BY_COLUMN );
-
-    if( m_viewControlsGrid->IsColShown( DISPLAY_NAME_COLUMN ) && m_viewControlsGrid->IsColShown( LABEL_COLUMN ) )
-    {
-        m_viewControlsGrid->SetColSize( DISPLAY_NAME_COLUMN, std::max( remainingWidth / 2, 60 ) );
-        m_viewControlsGrid->SetColSize( LABEL_COLUMN, std::max( remainingWidth - ( remainingWidth / 2 ), 60 ) );
-    }
-    else if( m_viewControlsGrid->IsColShown( DISPLAY_NAME_COLUMN ) )
-    {
-        m_viewControlsGrid->SetColSize( DISPLAY_NAME_COLUMN, std::max( remainingWidth, 60 ) );
-    }
-    else if( m_viewControlsGrid->IsColShown( LABEL_COLUMN ) )
-    {
-        m_viewControlsGrid->SetColSize( LABEL_COLUMN, std::max( remainingWidth, 60 ) );
-    }
-
-    event.Skip();
-}
-
-
 void DIALOG_SYMBOL_FIELDS_TABLE::OnSaveAndContinue( wxCommandEvent& aEvent )
 {
     if( TransferDataFromWindow() )
@@ -1434,20 +1408,9 @@ BOM_FMT_PRESET DIALOG_SYMBOL_FIELDS_TABLE::GetCurrentBomFmtSettings()
     current.refRangeDelimiter = m_textRefRangeDelimiter->GetValue();
     current.keepTabs = m_checkKeepTabs->GetValue();
     current.keepLineBreaks = m_checkKeepLineBreaks->GetValue();
+    current.includeByteOrderMark = m_checkIncludeByteOrderMark->GetValue();
 
     return current;
-}
-
-
-void DIALOG_SYMBOL_FIELDS_TABLE::ShowEditTab()
-{
-    m_nbPages->SetSelection( 0 );
-}
-
-
-void DIALOG_SYMBOL_FIELDS_TABLE::ShowExportTab()
-{
-    m_nbPages->SetSelection( 1 );
 }
 
 
@@ -1505,18 +1468,6 @@ void DIALOG_SYMBOL_FIELDS_TABLE::OnSidebarToggle( wxCommandEvent& event )
     }
 
     setSideBarButtonLook( cfg.sidebar_collapsed );
-}
-
-
-wxString DIALOG_SYMBOL_FIELDS_TABLE::GetDefaultBomFileName( const wxString& aSchematicFileName )
-{
-    if( aSchematicFileName.IsEmpty() )
-        return wxEmptyString;
-
-    wxFileName fn( aSchematicFileName );
-    fn.SetExt( FILEEXT::CsvFileExtension );
-
-    return fn.GetFullPath();
 }
 
 
@@ -1648,6 +1599,7 @@ void DIALOG_SYMBOL_FIELDS_TABLE::OnOk( wxCommandEvent& aEvent )
         m_job->m_refRangeDelimiter = fmtSettings.refRangeDelimiter;
         m_job->m_keepTabs = fmtSettings.keepTabs;
         m_job->m_keepLineBreaks = fmtSettings.keepLineBreaks;
+        m_job->m_includeByteOrderMark = fmtSettings.includeByteOrderMark;
 
         BOM_PRESET presetFields = m_dataModel->GetBomSettings();
         m_job->m_sortAsc = presetFields.sortAsc;
@@ -2272,7 +2224,8 @@ void DIALOG_SYMBOL_FIELDS_TABLE::syncBomFmtPresetSelection()
                                          && aPair.second.refDelimiter == current.refDelimiter
                                          && aPair.second.refRangeDelimiter == current.refRangeDelimiter
                                          && aPair.second.keepTabs == current.keepTabs
-                                         && aPair.second.keepLineBreaks == current.keepLineBreaks );
+                                         && aPair.second.keepLineBreaks == current.keepLineBreaks
+                                         && aPair.second.includeByteOrderMark == current.includeByteOrderMark );
                             } );
 
     if( it != m_bomFmtPresets.end() )
@@ -2481,6 +2434,7 @@ void DIALOG_SYMBOL_FIELDS_TABLE::doApplyBomFmtPreset( const BOM_FMT_PRESET& aPre
     m_textRefRangeDelimiter->ChangeValue( aPreset.refRangeDelimiter );
     m_checkKeepTabs->SetValue( aPreset.keepTabs );
     m_checkKeepLineBreaks->SetValue( aPreset.keepLineBreaks );
+    m_checkIncludeByteOrderMark->SetValue( aPreset.includeByteOrderMark );
 
     // Refresh the preview if that's the current page
     if( m_nbPages->GetSelection() == 1 )

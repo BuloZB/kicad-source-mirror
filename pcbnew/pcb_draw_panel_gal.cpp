@@ -36,6 +36,7 @@
 #include <pcb_generator.h>
 #include <pcb_marker.h>
 #include <pcb_point.h>
+#include <pcb_griditem.h>
 #include <pcb_base_frame.h>
 #include <pcbnew_settings.h>
 #include <ratsnest/ratsnest_data.h>
@@ -107,7 +108,10 @@ const int GAL_LAYER_ORDER[] = {
 
     LAYER_FP_TEXT, LAYER_FP_REFERENCES, LAYER_FP_VALUES,
 
-    LAYER_RATSNEST, LAYER_ANCHOR, LAYER_POINTS, LAYER_LOCKED_ITEM_SHADOW, LAYER_VIA_HOLES, LAYER_VIA_HOLEWALLS,
+    LAYER_GRIDITEMS,
+
+    LAYER_RATSNEST, LAYER_ANCHOR, LAYER_POINTS, LAYER_LOCKED_ITEM_SHADOW, LAYER_CONSTRAINT_SHADOW,
+    LAYER_VIA_HOLES, LAYER_VIA_HOLEWALLS,
     LAYER_PAD_PLATEDHOLES, LAYER_PAD_HOLEWALLS, LAYER_NON_PLATEDHOLES, LAYER_VIA_THROUGH, LAYER_VIA_BLIND,
     LAYER_VIA_BURIED, LAYER_VIA_MICROVIA,
 
@@ -282,6 +286,11 @@ void PCB_DRAW_PANEL_GAL::DisplayBoard( BOARD* aBoard, PROGRESS_REPORTER* aReport
 
     for( BOARD_ITEM* item : aBoard->GetItemSet() )
     {
+        // Geometry-free items (constraints) are never rendered; VIEW::Add would stamp their
+        // view data on an empty layer set and risk a later "already in a different view" assert.
+        if( item->Type() == PCB_CONSTRAINT_T )
+            continue;
+
         viewItems.push_back( item );
 
         if( item->Type() == PCB_FOOTPRINT_T )
@@ -289,7 +298,8 @@ void PCB_DRAW_PANEL_GAL::DisplayBoard( BOARD* aBoard, PROGRESS_REPORTER* aReport
             static_cast<FOOTPRINT*>( item )->RunOnChildren(
                     [&viewItems]( BOARD_ITEM* child )
                     {
-                        viewItems.push_back( child );
+                        if( child->Type() != PCB_CONSTRAINT_T )
+                            viewItems.push_back( child );
                     },
                     RECURSE_MODE::NO_RECURSE );
         }
@@ -337,6 +347,63 @@ void PCB_DRAW_PANEL_GAL::UpdateColors()
 }
 
 
+void PCB_DRAW_PANEL_GAL::prepareGridSources()
+{
+    std::vector<KIGFX::GRID_SOURCE> sources;
+
+    BOARD* board = nullptr;
+
+    if( PCB_BASE_FRAME* frame = dynamic_cast<PCB_BASE_FRAME*>( GetParentEDAFrame() ) )
+        board = frame->GetBoard();
+
+    // The "Grid Items" object visibility toggle hides the rendered grid
+    // content; the items themselves (selection decorations, snap) follow
+    // the same flag at their own sites.
+    if( !board || !board->IsElementVisible( LAYER_GRIDITEMS ) )
+    {
+        m_gal->SetGridSources( std::move( sources ) );
+        return;
+    }
+
+    // Grid content color comes from the "Grid Items" entry of the color
+    // theme, falling back to the global grid color.
+    COLOR4D gridItemColor = m_gal->GetGridColor();
+
+    if( PCB_BASE_FRAME* frame = dynamic_cast<PCB_BASE_FRAME*>( GetParentEDAFrame() ) )
+    {
+        if( COLOR_SETTINGS* cs = frame->GetColorSettings() )
+            gridItemColor = cs->GetColor( LAYER_GRIDITEMS );
+    }
+
+    for( BOARD_ITEM* item : board->Drawings() )
+    {
+        if( item->Type() != PCB_GRIDITEM_T )
+            continue;
+
+        PCB_GRIDITEM* grid = static_cast<PCB_GRIDITEM*>( item );
+
+        // Priority 0 is the background grid's; a grid item must never sink behind it.
+        wxASSERT( grid->GetAssignedPriority() > 0 );
+
+        KIGFX::GRID_SOURCE src;
+        static_cast<GRID_GEOMETRY&>( src ) = grid->AsGridGeometry();
+
+        // Pitch is a loop step in the renderer; the spacing setters keep it positive.
+        wxASSERT( src.pitch.x > 0.0 && src.pitch.y > 0.0 );
+
+        src.tick = grid->GetTickInterval();
+        src.highlighted = grid->IsSelected();
+        src.snapCursor = grid->Affects().cursor && !grid->IsSelected();
+        src.color = gridItemColor;
+        src.style = m_gal->GetGridStyle(); // inherit display style
+
+        sources.push_back( src );
+    }
+
+    m_gal->SetGridSources( std::move( sources ) );
+}
+
+
 void PCB_DRAW_PANEL_GAL::SetHighContrastLayer( PCB_LAYER_ID aLayer )
 {
     // Set display settings for high contrast mode
@@ -371,7 +438,8 @@ void PCB_DRAW_PANEL_GAL::SetHighContrastLayer( PCB_LAYER_ID aLayer )
                 LAYER_SELECT_OVERLAY, LAYER_GP_OVERLAY,
                 LAYER_RATSNEST, LAYER_CURSOR,
                 LAYER_ANCHOR,
-                LAYER_LOCKED_ITEM_SHADOW
+                LAYER_LOCKED_ITEM_SHADOW,
+                LAYER_CONSTRAINT_SHADOW
         };
 
         for( int i : layers )
@@ -407,7 +475,7 @@ void PCB_DRAW_PANEL_GAL::SetTopLayer( PCB_LAYER_ID aLayer )
         LAYER_VIA_HOLEWALLS,   LAYER_PAD_PLATEDHOLES, LAYER_PAD_HOLEWALLS, LAYER_NON_PLATEDHOLES, LAYER_PAD_NETNAMES,
         LAYER_VIA_NETNAMES,    LAYER_SELECT_OVERLAY,  LAYER_GP_OVERLAY,    LAYER_RATSNEST,        LAYER_ANCHOR,
         LAYER_DRC_HIGHLIGHTED, LAYER_DRC_ERROR,       LAYER_DRC_WARNING,   LAYER_DRC_EXCLUSION,   LAYER_MARKER_SHADOWS,
-        LAYER_DRC_SHAPES,      LAYER_CONFLICTS_SHADOW
+        LAYER_DRC_SHAPES,      LAYER_CONFLICTS_SHADOW, LAYER_CONSTRAINT_SHADOW
     };
 
     for( auto layer : layers )
@@ -717,8 +785,11 @@ void PCB_DRAW_PANEL_GAL::setDefaultLayerDeps()
     // that may change while the view stays the same.
     m_view->SetLayerTarget( LAYER_CONFLICTS_SHADOW, KIGFX::TARGET_OVERLAY );
 
+    // Constraint shadow drawn under item like locked-item shadow
+    // kept on cached target not overlay and re-cached on set change
     m_view->SetLayerDisplayOnly( LAYER_LOCKED_ITEM_SHADOW );
     m_view->SetLayerDisplayOnly( LAYER_CONFLICTS_SHADOW );
+    m_view->SetLayerDisplayOnly( LAYER_CONSTRAINT_SHADOW );
     m_view->SetLayerDisplayOnly( LAYER_BOARD_OUTLINE_AREA );
 
     // Some more required layers settings

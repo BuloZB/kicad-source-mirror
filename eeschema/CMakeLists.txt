@@ -107,6 +107,17 @@ set( EESCHEMA_SCH_IO
     # P-CAD 2006 ASCII IO plugin
     sch_io/pcad/sch_io_pcad.cpp
     sch_io/pcad/pcad_sch_parser.cpp
+
+    # OrCAD IO plugin
+    sch_io/orcad/orcad_cache.cpp
+    sch_io/orcad/orcad_converter_sheet.cpp
+    sch_io/orcad/orcad_converter_symbols.cpp
+    sch_io/orcad/orcad_library.cpp
+    sch_io/orcad/orcad_ole.cpp
+    sch_io/orcad/orcad_page.cpp
+    sch_io/orcad/orcad_stream.cpp
+    sch_io/orcad/orcad_structures.cpp
+    sch_io/orcad/sch_io_orcad.cpp
     )
 
 set( EESCHEMA_DLGS
@@ -177,7 +188,6 @@ set( EESCHEMA_DLGS
     dialogs/dialog_sheet_properties_base.cpp
     dialogs/dialog_symbol_chooser.cpp
     dialogs/dialog_symbol_fields_table.cpp
-    dialogs/dialog_symbol_fields_table_base.cpp
     dialogs/dialog_symbol_properties.cpp
     dialogs/dialog_symbol_properties_base.cpp
     dialogs/dialog_symbol_remap.cpp
@@ -471,7 +481,9 @@ set( EESCHEMA_SRCS
     symbol.cpp
     symbol_checker.cpp
     symbol_chooser_frame.cpp
+    variant_symbol_utils.cpp
     symbol_import_manager.cpp
+    symbol_import_reconciler.cpp
 
     symbol_library_manager.cpp
     symbol_tree_model_adapter.cpp
@@ -505,6 +517,7 @@ set( EESCHEMA_SRCS
     tools/assign_footprints.cpp
     tools/backannotate.cpp
     tools/sch_align_tool.cpp
+    tools/ee_graphic_tool.cpp
     tools/ee_grid_helper.cpp
     tools/rule_area_create_helper.cpp
     tools/sch_actions.cpp
@@ -655,6 +668,7 @@ target_include_directories( eeschema_kiface_objects
 target_link_libraries( eeschema_kiface_objects
     PUBLIC
         common
+        libwmf_orcad
         pads_common
         pcm )
 

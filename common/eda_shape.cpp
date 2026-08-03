@@ -1511,10 +1511,15 @@ void EDA_SHAPE::ShapeGetMsgPanelInfo( EDA_DRAW_FRAME* aFrame, std::vector<MSG_PA
         break;
 
     case SHAPE_T::POLY:
-        msg.Printf( wxS( "%d" ), GetPolyShape().Outline(0).PointCount() );
+    {
+        int pointCount = 0;
+        if( GetPolyShape().OutlineCount() > 0 )
+            pointCount = GetPolyShape().Outline( 0 ).PointCount();
+
+        msg.Printf( wxS( "%d" ), pointCount );
         aList.emplace_back( _( "Points" ), msg );
         break;
-
+    }
     case SHAPE_T::RECTANGLE:
         aList.emplace_back( _( "Width" ), aFrame->MessageTextFromValue( std::abs( GetEnd().x - GetStart().x ) ) );
         aList.emplace_back( _( "Height" ), aFrame->MessageTextFromValue( std::abs( GetEnd().y - GetStart().y ) ) );
@@ -2220,6 +2225,23 @@ void EDA_SHAPE::SetPolyPoints( const std::vector<VECTOR2I>& aPoints )
 
     for( const VECTOR2I& p : aPoints )
         GetPolyShape().Append( p.x, p.y );
+}
+
+
+std::vector<SHAPE*> EDA_SHAPE::MakeEffectiveShapesForStroking() const
+{
+    switch( m_shape )
+    {
+    // Stroke() has no Bezier primitive, so it gets the flattened polyline.  One chain, not
+    // loose segments, or the pattern restarts at every vertex.  This case goes away if
+    // Bezier ever becomes a SHAPE of its own.
+    case SHAPE_T::BEZIER: return { new SHAPE_LINE_CHAIN( buildBezierToSegmentsPointsList( getMaxError() ) ) };
+
+    case SHAPE_T::ELLIPSE:
+    case SHAPE_T::ELLIPSE_ARC: return { new SHAPE_ELLIPSE( buildShapeEllipse() ) };
+
+    default: return MakeEffectiveShapes( true );
+    }
 }
 
 

@@ -51,6 +51,7 @@
 #include <pcb_group.h>
 #include <pcb_generator.h>
 #include <pcb_point.h>
+#include <constraints/pcb_constraint.h>
 #include <pcb_target.h>
 #include <pcb_shape.h>
 #include <pcb_barcode.h>
@@ -168,6 +169,8 @@ BOARD::BOARD() :
 
 BOARD::~BOARD()
 {
+    // Clears m_indexedInBoard as it goes. Items that outlive the board rely on that to know
+    // ~BOARD_ITEM must not walk their parent chain back into freed memory
     ClearItemByIdCache();
 
     // Clean up the owned elements
@@ -175,13 +178,17 @@ BOARD::~BOARD()
 
     delete m_SolderMaskBridges;
 
-    BOARD_ITEM_SET ownedItems = GetItemSet();
+    std::vector<BOARD_ITEM*> ownedItems = collectOwnedItems();
+
+    std::sort( ownedItems.begin(), ownedItems.end() );
+    ownedItems.erase( std::unique( ownedItems.begin(), ownedItems.end() ), ownedItems.end() );
 
     m_zones.clear();
     m_footprints.clear();
     m_tracks.clear();
     m_drawings.clear();
     m_groups.clear();
+    m_constraints.clear();
     m_points.clear();
 
     delete m_boardOutline;
@@ -459,36 +466,43 @@ std::vector<PCB_MARKER*> BOARD::ResolveDRCExclusions( bool aCreateMarkers )
 
     for( PCB_MARKER* marker : GetBoard()->Markers() )
     {
-        std::set<wxString>::iterator it;
-        wxString                     serialized = marker->SerializeToString();
-        wxString                     matchedExclusion;
+        wxString serialized = marker->SerializeToString();
+        wxString matchedExclusion;
+        bool     matched = false;
 
         if( !serialized.Contains( "unconnected_items" ) )
         {
-            it = exclusions.find( serialized );
-
-            if( it != exclusions.end() )
-                matchedExclusion = *it;
+            // Markers reported on several layers serialize identically, so one stored exclusion
+            // has to cover them all or the extras can never be excluded
+            matched = exclusions.count( serialized ) > 0;
+            matchedExclusion = serialized;
         }
         else
         {
             const int  numberOfFieldsExcludingIds = 3;
             const char delimiter = '|';
-            it = FindByFirstNFields( exclusions, serialized, delimiter, numberOfFieldsExcludingIds );
+            auto       it = FindByFirstNFields( exclusions, serialized, delimiter, numberOfFieldsExcludingIds );
 
             if( it != exclusions.end() )
+            {
                 matchedExclusion = *it;
+                matched = true;
+
+                // Unlike the exact match above this one is a prefix match, so it has to be
+                // consumed or a single exclusion swallows every violation at that position
+                exclusions.erase( it );
+            }
         }
 
-        if( it != exclusions.end() )
+        if( matched )
         {
-            marker->SetExcluded( true, comments[matchedExclusion] );
+            const wxString& comment = comments[matchedExclusion];
+
+            marker->SetExcluded( true, comment );
 
             // Exclusion still valid; store back to BOARD_DESIGN_SETTINGS
             m_designSettings->m_DrcExclusions.insert( matchedExclusion );
-            m_designSettings->m_DrcExclusionComments[matchedExclusion] = comments[matchedExclusion];
-
-            exclusions.erase( it );
+            m_designSettings->m_DrcExclusionComments[matchedExclusion] = comment;
         }
     }
 
@@ -498,6 +512,10 @@ std::vector<PCB_MARKER*> BOARD::ResolveDRCExclusions( bool aCreateMarkers )
     {
         for( const wxString& serialized : exclusions )
         {
+            // Exact matches aren't consumed above, so skip the ones a marker already claimed
+            if( m_designSettings->m_DrcExclusions.count( serialized ) )
+                continue;
+
             PCB_MARKER* marker = PCB_MARKER::DeserializeFromString( serialized );
 
             if( !marker )
@@ -717,6 +735,9 @@ void BOARD::RunOnChildren( const std::function<void( BOARD_ITEM* )>& aFunction, 
 
         for( PCB_GROUP* group : m_groups )
             aFunction( group );
+
+        for( PCB_CONSTRAINT* constraint : m_constraints )
+            aFunction( constraint );
 
         for( PCB_POINT* point : m_points )
             aFunction( point );
@@ -1357,19 +1378,33 @@ void BOARD::Add( BOARD_ITEM* aBoardItem, ADD_MODE aMode, bool aSkipConnectivity 
 
     switch( aBoardItem->Type() )
     {
-    case PCB_NETINFO_T: m_NetInfo.AppendNet( (NETINFO_ITEM*) aBoardItem ); break;
+    case PCB_NETINFO_T:
+        m_NetInfo.AppendNet( (NETINFO_ITEM*) aBoardItem );
+        break;
 
     // this one uses a vector
-    case PCB_MARKER_T: m_markers.push_back( (PCB_MARKER*) aBoardItem ); break;
+    case PCB_MARKER_T:
+        m_markers.push_back( (PCB_MARKER*) aBoardItem );
+        break;
 
     // this one uses a vector
-    case PCB_GROUP_T: m_groups.push_back( (PCB_GROUP*) aBoardItem ); break;
+    case PCB_GROUP_T:
+        m_groups.push_back( (PCB_GROUP*) aBoardItem );
+        break;
+
+    case PCB_CONSTRAINT_T:
+        m_constraints.push_back( (PCB_CONSTRAINT*) aBoardItem );
+        break;
 
     // this one uses a vector
-    case PCB_GENERATOR_T: m_generators.push_back( (PCB_GENERATOR*) aBoardItem ); break;
+    case PCB_GENERATOR_T:
+        m_generators.push_back( (PCB_GENERATOR*) aBoardItem );
+        break;
 
     // this one uses a vector
-    case PCB_ZONE_T: m_zones.push_back( (ZONE*) aBoardItem ); break;
+    case PCB_ZONE_T:
+        m_zones.push_back( (ZONE*) aBoardItem );
+        break;
 
     case PCB_VIA_T:
         if( aMode == ADD_MODE::APPEND || aMode == ADD_MODE::BULK_APPEND )
@@ -1423,14 +1458,13 @@ void BOARD::Add( BOARD_ITEM* aBoardItem, ADD_MODE aMode, bool aSkipConnectivity 
     case PCB_TEXTBOX_T:
     case PCB_TABLE_T:
     case PCB_TARGET_T:
-    {
+    case PCB_GRIDITEM_T:
         if( aMode == ADD_MODE::APPEND || aMode == ADD_MODE::BULK_APPEND )
             m_drawings.push_back( aBoardItem );
         else
             m_drawings.push_front( aBoardItem );
 
         break;
-    }
 
     case PCB_POINT_T:
         // These aren't graphics as they have no physical presence
@@ -1525,27 +1559,41 @@ void BOARD::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aRemoveMode )
         break;
     }
 
-    case PCB_MARKER_T: std::erase( m_markers, aBoardItem ); break;
+    case PCB_MARKER_T:
+        std::erase( m_markers, aBoardItem );
+        break;
 
-    case PCB_GROUP_T: std::erase( m_groups, aBoardItem ); break;
+    case PCB_GROUP_T:
+        std::erase( m_groups, aBoardItem );
+        break;
 
-    case PCB_ZONE_T: std::erase( m_zones, aBoardItem ); break;
+    case PCB_CONSTRAINT_T:
+        std::erase( m_constraints, aBoardItem );
+        break;
 
-    case PCB_POINT_T: std::erase( m_points, aBoardItem ); break;
+    case PCB_ZONE_T:
+        std::erase( m_zones, aBoardItem );
+        break;
 
-    case PCB_GENERATOR_T: std::erase( m_generators, aBoardItem ); break;
+    case PCB_POINT_T:
+        std::erase( m_points, aBoardItem );
+        break;
+
+    case PCB_GENERATOR_T:
+        std::erase( m_generators, aBoardItem );
+        break;
 
     case PCB_FOOTPRINT_T:
-    {
         std::erase( m_footprints, aBoardItem );
         UncacheChildrenById( aBoardItem );
 
         break;
-    }
 
     case PCB_TRACE_T:
     case PCB_ARC_T:
-    case PCB_VIA_T: std::erase( m_tracks, aBoardItem ); break;
+    case PCB_VIA_T:
+        std::erase( m_tracks, aBoardItem );
+        break;
 
     case PCB_BARCODE_T:
     case PCB_DIM_ALIGNED_T:
@@ -1560,16 +1608,13 @@ void BOARD::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aRemoveMode )
     case PCB_TEXTBOX_T:
     case PCB_TABLE_T:
     case PCB_TARGET_T:
-    {
+    case PCB_GRIDITEM_T:
         std::erase( m_drawings, aBoardItem );
 
         if( aBoardItem->Type() == PCB_TABLE_T )
-        {
             UncacheChildrenById( aBoardItem );
-        }
 
         break;
-    }
 
     case PCB_TABLECELL_T:
         // Handled by parent table
@@ -1620,6 +1665,11 @@ void BOARD::RemoveAll( std::initializer_list<KICAD_T> aTypes )
             m_groups.clear();
             break;
 
+        case PCB_CONSTRAINT_T:
+            std::copy( m_constraints.begin(), m_constraints.end(), std::back_inserter( removed ) );
+            m_constraints.clear();
+            break;
+
         case PCB_POINT_T:
             std::copy( m_points.begin(), m_points.end(), std::back_inserter( removed ) );
             m_points.clear();
@@ -1646,7 +1696,9 @@ void BOARD::RemoveAll( std::initializer_list<KICAD_T> aTypes )
             break;
 
         case PCB_ARC_T:
-        case PCB_VIA_T: wxFAIL_MSG( wxT( "Use PCB_TRACE_T to remove all tracks, arcs, and vias" ) ); break;
+        case PCB_VIA_T:
+            wxFAIL_MSG( wxT( "Use PCB_TRACE_T to remove all tracks, arcs, and vias" ) );
+            break;
 
         case PCB_SHAPE_T:
             std::copy( m_drawings.begin(), m_drawings.end(), std::back_inserter( removed ) );
@@ -1664,9 +1716,12 @@ void BOARD::RemoveAll( std::initializer_list<KICAD_T> aTypes )
         case PCB_TEXTBOX_T:
         case PCB_TABLE_T:
         case PCB_TARGET_T:
-        case PCB_BARCODE_T: wxFAIL_MSG( wxT( "Use PCB_SHAPE_T to remove all graphics and text" ) ); break;
+        case PCB_BARCODE_T:
+            wxFAIL_MSG( wxT( "Use PCB_SHAPE_T to remove all graphics and text" ) );
+            break;
 
-        default: wxFAIL_MSG( wxT( "BOARD::RemoveAll() needs more ::Type() support" ) );
+        default:
+            wxFAIL_MSG( wxT( "BOARD::RemoveAll() needs more ::Type() support" ) );
         }
     }
 
@@ -1896,6 +1951,21 @@ void BOARD::DetachAllFootprints()
 }
 
 
+static PCB_TABLECELL* findTableCell( const BOARD_ITEM* aDrawing, const KIID& aID )
+{
+    if( aDrawing->Type() != PCB_TABLE_T )
+        return nullptr;
+
+    for( PCB_TABLECELL* cell : static_cast<const PCB_TABLE*>( aDrawing )->GetCells() )
+    {
+        if( cell->m_Uuid == aID )
+            return cell;
+    }
+
+    return nullptr;
+}
+
+
 BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) const
 {
     if( aID == niluuid )
@@ -1911,6 +1981,12 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
     {
         if( group->m_Uuid == aID )
             return CacheAndReturnItemById( aID, group );
+    }
+
+    for( PCB_CONSTRAINT* constraint : m_constraints )
+    {
+        if( constraint->m_Uuid == aID )
+            return CacheAndReturnItemById( aID, constraint );
     }
 
     for( PCB_GENERATOR* generator : m_generators )
@@ -1946,6 +2022,9 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
 
         for( BOARD_ITEM* drawing : footprint->GraphicalItems() )
         {
+            if( PCB_TABLECELL* cell = findTableCell( drawing, aID ) )
+                return CacheAndReturnItemById( aID, cell );
+
             if( drawing->m_Uuid == aID )
                 return CacheAndReturnItemById( aID, drawing );
         }
@@ -1960,6 +2039,12 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
         {
             if( group->m_Uuid == aID )
                 return CacheAndReturnItemById( aID, group );
+        }
+
+        for( PCB_CONSTRAINT* constraint : footprint->Constraints() )
+        {
+            if( constraint->m_Uuid == aID )
+                return CacheAndReturnItemById( aID, constraint );
         }
 
         for( PCB_POINT* point : footprint->Points() )
@@ -1977,14 +2062,8 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
 
     for( BOARD_ITEM* drawing : Drawings() )
     {
-        if( drawing->Type() == PCB_TABLE_T )
-        {
-            for( PCB_TABLECELL* cell : static_cast<PCB_TABLE*>( drawing )->GetCells() )
-            {
-                if( cell->m_Uuid == aID )
-                    return CacheAndReturnItemById( aID, drawing );
-            }
-        }
+        if( PCB_TABLECELL* cell = findTableCell( drawing, aID ) )
+            return CacheAndReturnItemById( aID, cell );
 
         if( drawing->m_Uuid == aID )
             return CacheAndReturnItemById( aID, drawing );
@@ -2041,28 +2120,35 @@ void BOARD::CacheItemById( BOARD_ITEM* aItem ) const
     if( IsFootprintHolder() )
         return;
 
-    if( auto prev = m_cachedIdByItem.find( aItem );
-        prev != m_cachedIdByItem.end() && prev->second != aItem->m_Uuid )
+    // Called once per item on load, so probe and insert in one lookup per map and pay for the
+    // aliasing fixups only when a key was already taken
+    auto [idIt, idInserted] = m_itemByIdCache.try_emplace( aItem->m_Uuid, aItem );
+    auto [itemIt, itemInserted] = m_cachedIdByItem.try_emplace( aItem, aItem->m_Uuid );
+
+    if( !itemInserted && itemIt->second != aItem->m_Uuid )
     {
-        auto prevIt = m_itemByIdCache.find( prev->second );
+        // The item was indexed under an older UUID; drop that forward alias
+        auto prevIt = m_itemByIdCache.find( itemIt->second );
 
         if( prevIt != m_itemByIdCache.end() && prevIt->second == aItem )
             m_itemByIdCache.erase( prevIt );
+
+        itemIt->second = aItem->m_Uuid;
     }
 
-    if( auto existing = m_itemByIdCache.find( aItem->m_Uuid );
-        existing != m_itemByIdCache.end() && existing->second != aItem )
+    if( !idInserted && idIt->second != aItem )
     {
-        if( auto prev = m_cachedIdByItem.find( existing->second );
+        // Another item already claims this UUID; evict it
+        if( auto prev = m_cachedIdByItem.find( idIt->second );
             prev != m_cachedIdByItem.end() && prev->second == aItem->m_Uuid )
         {
-            existing->second->m_indexedInBoard = false;
+            idIt->second->m_indexedInBoard = false;
             m_cachedIdByItem.erase( prev );
         }
+
+        idIt->second = aItem;
     }
 
-    m_itemByIdCache.insert_or_assign( aItem->m_Uuid, aItem );
-    m_cachedIdByItem.insert_or_assign( aItem, aItem->m_Uuid );
     aItem->m_indexedInBoard = true;
 }
 
@@ -2287,6 +2373,9 @@ void BOARD::FillItemMap( std::map<KIID, EDA_ITEM*>& aMap )
 
     for( PCB_GROUP* group : m_groups )
         aMap[group->m_Uuid] = group;
+
+    for( PCB_CONSTRAINT* constraint : m_constraints )
+        aMap[constraint->m_Uuid] = constraint;
 
     for( PCB_POINT* point : m_points )
         aMap[point->m_Uuid] = point;
@@ -2615,12 +2704,11 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
         case PCB_DIM_LEADER_T:
         case PCB_TARGET_T:
         case PCB_BARCODE_T:
+        case PCB_GRIDITEM_T:
             if( !footprintsScanned )
             {
                 if( IterateForward<FOOTPRINT*>( m_footprints, inspector, testData, scanTypes ) == INSPECT_RESULT::QUIT )
-                {
                     return INSPECT_RESULT::QUIT;
-                }
 
                 footprintsScanned = true;
             }
@@ -2628,9 +2716,7 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
             if( !drawingsScanned )
             {
                 if( IterateForward<BOARD_ITEM*>( m_drawings, inspector, testData, scanTypes ) == INSPECT_RESULT::QUIT )
-                {
                     return INSPECT_RESULT::QUIT;
-                }
 
                 drawingsScanned = true;
             }
@@ -2643,9 +2729,7 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
             if( !tracksScanned )
             {
                 if( IterateForward<PCB_TRACK*>( m_tracks, inspector, testData, scanTypes ) == INSPECT_RESULT::QUIT )
-                {
                     return INSPECT_RESULT::QUIT;
-                }
 
                 tracksScanned = true;
             }
@@ -2674,9 +2758,7 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
             if( !footprintsScanned )
             {
                 if( IterateForward<FOOTPRINT*>( m_footprints, inspector, testData, scanTypes ) == INSPECT_RESULT::QUIT )
-                {
                     return INSPECT_RESULT::QUIT;
-                }
 
                 footprintsScanned = true;
             }
@@ -2693,9 +2775,7 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
             if( !footprintsScanned )
             {
                 if( IterateForward<FOOTPRINT*>( m_footprints, inspector, testData, scanTypes ) == INSPECT_RESULT::QUIT )
-                {
                     return INSPECT_RESULT::QUIT;
-                }
 
                 footprintsScanned = true;
             }
@@ -2710,13 +2790,21 @@ INSPECT_RESULT BOARD::Visit( INSPECTOR inspector, void* testData, const std::vec
 
         case PCB_GROUP_T:
             if( IterateForward<PCB_GROUP*>( m_groups, inspector, testData, { scanType } ) == INSPECT_RESULT::QUIT )
+                return INSPECT_RESULT::QUIT;
+
+            break;
+
+        case PCB_CONSTRAINT_T:
+            if( IterateForward<PCB_CONSTRAINT*>( m_constraints, inspector, testData, { scanType } )
+                == INSPECT_RESULT::QUIT )
             {
                 return INSPECT_RESULT::QUIT;
             }
 
             break;
 
-        default: break;
+        default:
+            break;
         }
     }
 
@@ -3071,6 +3159,46 @@ void BOARD::SynchronizeTuningProfileProperties()
 }
 
 
+void BOARD::ApplyNetChainNetclasses()
+{
+    if( !m_project )
+        return;
+
+    const std::shared_ptr<NET_SETTINGS>& netSettings = GetDesignSettings().m_NetSettings;
+
+    if( !netSettings )
+        return;
+
+    const std::map<wxString, wxString>& chainNetclasses = netSettings->GetNetChainNetClasses();
+
+    // Nothing to derive and nothing left from a prior pass, so skip the cache wipe a rebuild
+    // would cost on every resync of a board without chain overrides.
+    if( chainNetclasses.empty()
+            && !netSettings->HasChainPatternAssignments( NET_CHAIN_SOURCE::BOARD ) )
+    {
+        return;
+    }
+
+    netSettings->ClearChainPatternAssignments( NET_CHAIN_SOURCE::BOARD );
+
+    for( NETINFO_ITEM* net : m_NetInfo )
+    {
+        const wxString& chainName = net->GetNetChain();
+
+        if( chainName.IsEmpty() )
+            continue;
+
+        auto it = chainNetclasses.find( chainName );
+
+        if( it == chainNetclasses.end() || !netSettings->HasNetclass( it->second ) )
+            continue;
+
+        netSettings->SetChainPatternAssignment( NET_CHAIN_SOURCE::BOARD, net->GetNetname(),
+                                                it->second );
+    }
+}
+
+
 void BOARD::SynchronizeNetsAndNetClasses( bool aResetTrackAndViaSizes )
 {
     if( !m_project )
@@ -3078,6 +3206,8 @@ void BOARD::SynchronizeNetsAndNetClasses( bool aResetTrackAndViaSizes )
 
     BOARD_DESIGN_SETTINGS&           bds = GetDesignSettings();
     const std::shared_ptr<NETCLASS>& defaultNetClass = bds.m_NetSettings->GetDefaultNetclass();
+
+    ApplyNetChainNetclasses();
 
     bds.m_NetSettings->ClearAllCaches();
 
@@ -3816,46 +3946,56 @@ bool BOARD::cmp_drawings::operator()( const BOARD_ITEM* aFirst, const BOARD_ITEM
     if( aFirst->GetLayer() != aSecond->GetLayer() )
         return aFirst->GetLayer() < aSecond->GetLayer();
 
+    // Callers keep these in a std::set, so any branch reporting equality for two distinct items
+    // loses one of them. Every branch has to fall through to the uuid
+    int cmp = 0;
+
     if( aFirst->Type() == PCB_SHAPE_T )
     {
         const PCB_SHAPE* shape = static_cast<const PCB_SHAPE*>( aFirst );
         const PCB_SHAPE* other = static_cast<const PCB_SHAPE*>( aSecond );
-        return shape->Compare( other ) < 0;
+
+        cmp = shape->Compare( other );
     }
     else if( aFirst->Type() == PCB_TEXT_T || aFirst->Type() == PCB_FIELD_T )
     {
         const PCB_TEXT* text = static_cast<const PCB_TEXT*>( aFirst );
         const PCB_TEXT* other = static_cast<const PCB_TEXT*>( aSecond );
-        return text->Compare( other ) < 0;
+
+        cmp = text->Compare( other );
     }
     else if( aFirst->Type() == PCB_TEXTBOX_T )
     {
         const PCB_TEXTBOX* textbox = static_cast<const PCB_TEXTBOX*>( aFirst );
         const PCB_TEXTBOX* other = static_cast<const PCB_TEXTBOX*>( aSecond );
 
-        int shapeCmp = textbox->PCB_SHAPE::Compare( other );
+        cmp = textbox->PCB_SHAPE::Compare( other );
 
-        if( shapeCmp != 0 )
-            return shapeCmp < 0;
-
-        return textbox->EDA_TEXT::Compare( other ) < 0;
+        if( cmp == 0 )
+            cmp = textbox->EDA_TEXT::Compare( other );
     }
     else if( aFirst->Type() == PCB_TABLE_T )
     {
         const PCB_TABLE* table = static_cast<const PCB_TABLE*>( aFirst );
         const PCB_TABLE* other = static_cast<const PCB_TABLE*>( aSecond );
 
-        return PCB_TABLE::Compare( table, other ) < 0;
+        cmp = PCB_TABLE::Compare( table, other );
     }
     else if( aFirst->Type() == PCB_BARCODE_T )
     {
         const PCB_BARCODE* barcode = static_cast<const PCB_BARCODE*>( aFirst );
         const PCB_BARCODE* other = static_cast<const PCB_BARCODE*>( aSecond );
 
-        return PCB_BARCODE::Compare( barcode, other ) < 0;
+        cmp = PCB_BARCODE::Compare( barcode, other );
     }
 
-    return aFirst->m_Uuid < aSecond->m_Uuid;
+    if( cmp != 0 )
+        return cmp < 0;
+
+    if( aFirst->m_Uuid != aSecond->m_Uuid )
+        return aFirst->m_Uuid < aSecond->m_Uuid;
+
+    return aFirst < aSecond;
 }
 
 
@@ -3955,26 +4095,40 @@ void BOARD::ConvertBrdLayerToPolygonalContours( PCB_LAYER_ID aLayer, SHAPE_POLY_
             break;
         }
 
-        default: break;
+        default:
+            break;
         }
     }
 }
 
 
-const BOARD_ITEM_SET BOARD::GetItemSet()
+std::vector<BOARD_ITEM*> BOARD::collectOwnedItems() const
 {
-    BOARD_ITEM_SET items;
+    std::vector<BOARD_ITEM*> items;
 
-    std::copy( m_tracks.begin(), m_tracks.end(), std::inserter( items, items.end() ) );
-    std::copy( m_zones.begin(), m_zones.end(), std::inserter( items, items.end() ) );
-    std::copy( m_generators.begin(), m_generators.end(), std::inserter( items, items.end() ) );
-    std::copy( m_footprints.begin(), m_footprints.end(), std::inserter( items, items.end() ) );
-    std::copy( m_drawings.begin(), m_drawings.end(), std::inserter( items, items.end() ) );
-    std::copy( m_markers.begin(), m_markers.end(), std::inserter( items, items.end() ) );
-    std::copy( m_groups.begin(), m_groups.end(), std::inserter( items, items.end() ) );
-    std::copy( m_points.begin(), m_points.end(), std::inserter( items, items.end() ) );
+    items.reserve( m_tracks.size() + m_zones.size() + m_generators.size() + m_footprints.size()
+                   + m_drawings.size() + m_markers.size() + m_groups.size() + m_constraints.size()
+                   + m_points.size() );
+
+    items.insert( items.end(), m_tracks.begin(), m_tracks.end() );
+    items.insert( items.end(), m_zones.begin(), m_zones.end() );
+    items.insert( items.end(), m_generators.begin(), m_generators.end() );
+    items.insert( items.end(), m_footprints.begin(), m_footprints.end() );
+    items.insert( items.end(), m_drawings.begin(), m_drawings.end() );
+    items.insert( items.end(), m_markers.begin(), m_markers.end() );
+    items.insert( items.end(), m_groups.begin(), m_groups.end() );
+    items.insert( items.end(), m_constraints.begin(), m_constraints.end() );
+    items.insert( items.end(), m_points.begin(), m_points.end() );
 
     return items;
+}
+
+
+const BOARD_ITEM_SET BOARD::GetItemSet()
+{
+    std::vector<BOARD_ITEM*> items = collectOwnedItems();
+
+    return BOARD_ITEM_SET( items.begin(), items.end() );
 }
 
 

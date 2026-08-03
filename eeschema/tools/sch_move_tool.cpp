@@ -863,7 +863,8 @@ bool SCH_MOVE_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, SCH_COMMIT* aComm
             }
             else
             {
-                m_cursor = grid.BestSnapAnchor( controls->GetCursorPosition( false ), snapLayer, selection );
+                m_cursor = grid.ResolveSnap( controls->GetCursorPosition( false ), snapLayer, selection, prevPos )
+                                .position;
             }
 
             if( axisLock == AXIS_LOCK::HORIZONTAL )
@@ -882,6 +883,12 @@ bool SCH_MOVE_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, SCH_COMMIT* aComm
 
             if( sheet != hoverSheet )
             {
+                if( hoverSheet )
+                {
+                    hoverSheet->ClearFlags( BRIGHTENED );
+                    m_frame->UpdateItem( hoverSheet, false );
+                }
+
                 hoverSheet = sheet;
 
                 if( hoverSheet )

@@ -41,6 +41,7 @@
 #include <api/board/board_jobs.pb.h>
 #include <api/schematic/schematic_jobs.pb.h>
 #include <board_stackup_manager/board_stackup.h>
+#include <constraints/pcb_constraint.h>
 #include <jobs/job_export_sch_netlist.h>
 #include <jobs/job_export_sch_plot.h>
 #include <jobs/job_export_pcb_3d.h>
@@ -229,6 +230,17 @@ BOOST_AUTO_TEST_CASE( RuleSeverity )
     testEnums<SEVERITY, kiapi::common::types::RuleSeverity>();
 }
 
+BOOST_AUTO_TEST_CASE( ConstraintType )
+{
+    // UNDEFINED is an internal sentinel that is not exposed to the API.
+    testEnums<PCB_CONSTRAINT_TYPE, kiapi::board::types::ConstraintType>( true );
+}
+
+BOOST_AUTO_TEST_CASE( ConstraintAnchor )
+{
+    testEnums<CONSTRAINT_ANCHOR, kiapi::board::types::ConstraintAnchor>();
+}
+
 BOOST_AUTO_TEST_CASE( DesignRuleType )
 {
     using ProtoType = kiapi::board::DrcErrorType;
@@ -241,7 +253,6 @@ BOOST_AUTO_TEST_CASE( DesignRuleType )
                                 DRCE_CREEPAGE,
                                 DRCE_TRACKS_CROSSING,
                                 DRCE_EDGE_CLEARANCE,
-                                DRCE_ZONES_INTERSECT,
                                 DRCE_ISOLATED_COPPER,
                                 DRCE_STARVED_THERMAL,
                                 DRCE_DANGLING_VIA,
@@ -289,13 +300,13 @@ BOOST_AUTO_TEST_CASE( DesignRuleType )
                                 DRCE_LENGTH_OUT_OF_RANGE,
                                 DRCE_SKEW_OUT_OF_RANGE,
                                 DRCE_VIA_COUNT_OUT_OF_RANGE,
-                                DRCE_DIFF_PAIR_GAP_OUT_OF_RANGE,
-                                DRCE_DIFF_PAIR_UNCOUPLED_LENGTH_TOO_LONG,
+                                DRCE_DP_GAP_OUT_OF_RANGE,
+                                DRCE_DP_UNCOUPLED_LENGTH_TOO_LONG,
                                 DRCE_FOOTPRINT,
                                 DRCE_FOOTPRINT_TYPE_MISMATCH,
                                 DRCE_PAD_TH_WITH_NO_HOLE,
                                 DRCE_MIRRORED_TEXT_ON_FRONT_LAYER,
-                                DRCE_NONMIRRORED_TEXT_ON_BACK_LAYER,
+                                DRCE_UNMIRRORED_TEXT_ON_BACK_LAYER,
                                 DRCE_MISSING_TUNING_PROFILE,
                                 DRCE_TRACK_ON_POST_MACHINED_LAYER,
                                 DRCE_TRACK_NOT_CENTERED_ON_VIA } )

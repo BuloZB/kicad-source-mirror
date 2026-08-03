@@ -167,7 +167,8 @@ std::optional<TOOLBAR_CONFIGURATION> PCB_EDIT_TOOLBAR_SETTINGS::DefaultToolbarCo
             .AppendGroup( TOOLBAR_GROUP_CONFIG( _( "Line modes" ) )
                         .AddAction( PCB_ACTIONS::lineModeFree )
                         .AddAction( PCB_ACTIONS::lineMode90 )
-                        .AddAction( PCB_ACTIONS::lineMode45 ) );
+                        .AddAction( PCB_ACTIONS::lineMode45 ) )
+            .AppendAction( PCB_ACTIONS::toggleAutoConstraints );
 
         config.AppendSeparator()
               .AppendAction( PCB_ACTIONS::showRatsnest )
@@ -273,6 +274,25 @@ std::optional<TOOLBAR_CONFIGURATION> PCB_EDIT_TOOLBAR_SETTINGS::DefaultToolbarCo
               .AppendGroup( TOOLBAR_GROUP_CONFIG( _( "Circle" ) )
                             .AddAction( PCB_ACTIONS::drawCircle )
                             .AddAction( PCB_ACTIONS::drawEllipse ) )
+              .AppendGroup( TOOLBAR_GROUP_CONFIG( _( "Constraints" ) )
+                            .AddAction( PCB_ACTIONS::addConstraintCoincident )
+                            .AddAction( PCB_ACTIONS::addConstraintPointOnLine )
+                            .AddAction( PCB_ACTIONS::addConstraintMidpoint )
+                            .AddAction( PCB_ACTIONS::addConstraintSymmetric )
+                            .AddAction( PCB_ACTIONS::addConstraintFixedPosition )
+                            .AddAction( PCB_ACTIONS::addConstraintParallel )
+                            .AddAction( PCB_ACTIONS::addConstraintPerpendicular )
+                            .AddAction( PCB_ACTIONS::addConstraintCollinear )
+                            .AddAction( PCB_ACTIONS::addConstraintHorizontal )
+                            .AddAction( PCB_ACTIONS::addConstraintVertical )
+                            .AddAction( PCB_ACTIONS::addConstraintTangent )
+                            .AddAction( PCB_ACTIONS::addConstraintEqualLength )
+                            .AddAction( PCB_ACTIONS::addConstraintEqualRadius )
+                            .AddAction( PCB_ACTIONS::addConstraintConcentric )
+                            .AddAction( PCB_ACTIONS::addConstraintFixedLength )
+                            .AddAction( PCB_ACTIONS::addConstraintFixedRadius )
+                            .AddAction( PCB_ACTIONS::addConstraintArcAngle )
+                            .AddAction( PCB_ACTIONS::addConstraintAngular ) )
               .AppendAction( PCB_ACTIONS::drawPolygon )
               .AppendAction( PCB_ACTIONS::drawBezier )
               .AppendAction( PCB_ACTIONS::placeReferenceImage )
@@ -294,6 +314,7 @@ std::optional<TOOLBAR_CONFIGURATION> PCB_EDIT_TOOLBAR_SETTINGS::DefaultToolbarCo
                             .AddAction( ACTIONS::gridSetOrigin )
                             .AddAction( PCB_ACTIONS::drillOrigin ) )
                             .AppendAction( PCB_ACTIONS::placePoint )
+              .AppendAction( PCB_ACTIONS::placeGridItem )
               .AppendAction( ACTIONS::measureTool );
 
         break;

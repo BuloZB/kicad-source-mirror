@@ -28,6 +28,7 @@
 #include <settings/common_settings.h>
 #include <settings/nested_settings.h>
 #include <settings/parameters.h>
+#include <settings/snap_settings_params.h>
 #include <settings/settings_manager.h>
 #include <wx/config.h>
 #include <wx/tokenzr.h>
@@ -40,29 +41,30 @@
 const int pcbnewSchemaVersion = 5;
 
 
-PCBNEW_SETTINGS::PCBNEW_SETTINGS()
-        : PCB_VIEWERS_SETTINGS_BASE( "pcbnew", pcbnewSchemaVersion ),
-          m_AuiPanels(),
-          m_FootprintChooser(),
-          m_FootprintViewer(),
-          m_FootprintWizard(),
-          m_Display(),
-          m_TrackDragAction( TRACK_DRAG_ACTION::DRAG ),
-          m_ArcEditMode( ARC_EDIT_MODE::KEEP_CENTER_ADJUST_ANGLE_RADIUS ),
-          m_CtrlClickHighlight( false ),
-          m_AngleSnapMode( LEADER_MODE::DIRECT ),
-          m_FlipDirection( FLIP_DIRECTION::TOP_BOTTOM ),
-          m_ESCClearsNetHighlight( true ),
-          m_PolarCoords( false ),
-          m_RotationAngle( ANGLE_90 ),
-          m_ShowPageLimits( true ),
-          m_ShowCourtyardCollisions( true ),
-          m_AutoRefillZones( false ),
-          m_AllowFreePads( false ),
-          m_ImportKeepKiCadLayerNames( false ),
-          m_PnsSettings( nullptr ),
-          m_FootprintViewerLibListWidth( 200 ),
-          m_FootprintViewerFPListWidth( 300 )
+PCBNEW_SETTINGS::PCBNEW_SETTINGS() :
+        PCB_VIEWERS_SETTINGS_BASE( "pcbnew", pcbnewSchemaVersion ),
+        m_AuiPanels(),
+        m_FootprintChooser(),
+        m_FootprintViewer(),
+        m_FootprintWizard(),
+        m_Display(),
+        m_TrackDragAction( TRACK_DRAG_ACTION::DRAG ),
+        m_ArcEditMode( ARC_EDIT_MODE::KEEP_CENTER_ADJUST_ANGLE_RADIUS ),
+        m_CtrlClickHighlight( false ),
+        m_AngleSnapMode( LEADER_MODE::DIRECT ),
+        m_FlipDirection( FLIP_DIRECTION::TOP_BOTTOM ),
+        m_AutoConstraints( true ),
+        m_ESCClearsNetHighlight( true ),
+        m_PolarCoords( false ),
+        m_RotationAngle( ANGLE_90 ),
+        m_ShowPageLimits( true ),
+        m_ShowCourtyardCollisions( true ),
+        m_AutoRefillZones( false ),
+        m_AllowFreePads( false ),
+        m_ImportKeepKiCadLayerNames( false ),
+        m_PnsSettings( nullptr ),
+        m_FootprintViewerLibListWidth( 200 ),
+        m_FootprintViewerFPListWidth( 300 )
 {
     m_MagneticItems.pads      = MAGNETIC_OPTIONS::CAPTURE_CURSOR_IN_TRACK_TOOL;
     m_MagneticItems.tracks    = MAGNETIC_OPTIONS::CAPTURE_CURSOR_IN_TRACK_TOOL;
@@ -167,6 +169,8 @@ PCBNEW_SETTINGS::PCBNEW_SETTINGS()
     m_params.emplace_back( new PARAM<bool>( "editing.magnetic_all_layers",
             &m_MagneticItems.allLayers, false ) );
 
+    AddSnapInferenceParams( m_params, m_SnapInference );
+
     m_params.emplace_back( new PARAM<bool>( "editing.polar_coords",
             &m_PolarCoords, false ) );
 
@@ -184,6 +188,8 @@ PCBNEW_SETTINGS::PCBNEW_SETTINGS()
     m_params.emplace_back( new PARAM<int>( "editing.pcb_angle_snap_mode",
             reinterpret_cast<int*>( &m_AngleSnapMode ),
             static_cast<int>( LEADER_MODE::DIRECT ) ) );
+
+    m_params.emplace_back( new PARAM<bool>( "editing.auto_constraints", &m_AutoConstraints, true ) );
 
     m_params.emplace_back( new PARAM<bool>( "editing.auto_fill_zones",
             &m_AutoRefillZones, false ) );
@@ -245,6 +251,8 @@ PCBNEW_SETTINGS::PCBNEW_SETTINGS()
 
     m_params.emplace_back( new PARAM<bool>( "pcb_display.ratsnest_global",
             &m_Display.m_ShowGlobalRatsnest, true ) );
+
+    m_params.emplace_back( new PARAM<bool>( "pcb_display.show_constraints", &m_Display.m_ShowConstraints, false ) );
 
     m_params.emplace_back( new PARAM<bool>( "pcb_display.ratsnest_footprint",
             &m_Display.m_ShowModuleRatsnest, true ) );

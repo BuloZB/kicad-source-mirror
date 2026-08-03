@@ -40,7 +40,6 @@ class SPICE_SETTINGS;
 class EESCHEMA_SETTINGS;
 class SPICE_CIRCUIT_MODEL;
 
-class SIM_THREAD_REPORTER;
 class TUNER_SLIDER;
 
 
@@ -180,6 +179,9 @@ public:
     bool DarkModePlots() const { return m_darkMode; }
     void ToggleDarkModePlots();
 
+    ///< Toggle the current S-parameter tab between Smith chart and amplitude/phase views.
+    void ToggleSmithChart();
+
     void ShowChangedLanguage();
 
     /**
@@ -266,8 +268,8 @@ public:
     void OnPlotSettingsChanged();
 
     void OnSimUpdate();
-    void OnSimReport( const wxString& aMsg );
     void OnSimRefresh( bool aFinal );
+    void FlushSimConsole();
 
     void OnModify();
 
@@ -288,6 +290,9 @@ private:
      */
     void updateTrace( const wxString& aVectorName, int aTraceType, SIM_PLOT_TAB* aPlotTab,
                       std::vector<double>* aDataX = nullptr, bool aClearData = false );
+
+    ///< Reference impedance of the response port for an S-parameter vector, zero when unresolved.
+    double getSmithPortImpedance( const wxString& aVectorName );
 
     /**
      * A common toggler for the two main wxSplitterWindow s
@@ -322,6 +327,19 @@ private:
      * Update the cursor values (in the grid) and graphics (in the plot window).
      */
     void updatePlotCursors();
+
+    /**
+     * Add or remove the Smith-only cursor columns, carrying their shown/hidden state across.
+     */
+    void updateSmithCursorColumns( bool aSmithMode );
+
+    void fillSmithCursorRow( int aRow, CURSOR* aCursor, TRACE* aTrace );
+
+    void setSmithCursorColumnLabels();
+
+    void rememberSmithCursorColumns();
+
+    void applySmithCursorColumns();
 
     /**
      * Updates m_signalsGrid cursor widget, column rendering and attributes
@@ -413,6 +431,9 @@ private:
         int traceType = SPT_UNKNOWN;
         std::vector<double> xValues;
         std::vector<std::vector<double>> yValues;
+
+        // smith traces carry Re(gamma) in x, different every run, stored per run here
+        std::vector<std::vector<double>> xRuns;
     };
 
     struct MULTI_RUN_STEP
@@ -441,6 +462,9 @@ private:
 
     // Holds cursor formating for m_cursorsGrid, includes m_cursorFormats[3][2], TODO: merge.
     std::vector<std::vector<SPICE_VALUE_FORMAT>> m_cursorFormatsDyn;
+
+    wxString m_smithCursorColumns;
+    std::vector<int> m_smithCursorWidths;
 
     // Variables for temporary storage:
     int                          m_splitterLeftRightSashPosition;

@@ -361,6 +361,18 @@ wxString FILEEXT::DipTraceFilesWildcard()
 }
 
 
+wxString FILEEXT::OrCadSchematicFilesWildcard()
+{
+    return _( "OrCAD Capture schematic files" ) + AddFileExtListToFilter( { "dsn" } );
+}
+
+
+wxString FILEEXT::AllegroPcbFilesWildcard()
+{
+    return _( "Allegro PCB files" ) + AddFileExtListToFilter( { "brd" } );
+}
+
+
 wxString FILEEXT::PcbFileWildcard()
 {
     return _( "KiCad printed circuit board files" )

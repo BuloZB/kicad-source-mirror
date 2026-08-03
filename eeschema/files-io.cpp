@@ -63,6 +63,7 @@
 #include <schematic.h>
 #include <settings/settings_manager.h>
 #include <sim/simulator_frame.h>
+#include <symbol_import_reconciler.h>
 #include <tool/actions.h>
 #include <tool/tool_manager.h>
 #include <tools/sch_editor_control.h>
@@ -216,8 +217,22 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
     // Start a new schematic object now that we sorted out our project
     std::unique_ptr<SCHEMATIC> newSchematic = std::make_unique<SCHEMATIC>( &Prj() );
 
-    SCH_IO_MGR::SCH_FILE_T schFileType = SCH_IO_MGR::GuessPluginTypeFromSchPath( fullFileName,
-                                                                                 KICTL_KICAD_ONLY );
+    SCH_IO_MGR::SCH_FILE_T schFileType = SCH_IO_MGR::GuessPluginTypeFromSchPath( fullFileName, aCtl );
+
+    bool isNonKicadImport = schFileType != SCH_IO_MGR::SCH_KICAD
+                            && schFileType != SCH_IO_MGR::SCH_LEGACY
+                            && schFileType != SCH_IO_MGR::SCH_FILE_UNKNOWN;
+
+    // If this is a recognised non-KiCad format, delegate to the import path.
+    // Callers that pass KICTL_KICAD_ONLY (e.g. GUI open) won't reach
+    // this branch because GuessPluginTypeFromSchPath already returns SCH_FILE_UNKNOWN
+    // for these formats.
+    if( isNonKicadImport )
+    {
+        progressReporter.Hide();
+        importFile( fullFileName, schFileType, nullptr );
+        return true;
+    }
 
     if( schFileType == SCH_IO_MGR::SCH_LEGACY )
     {
@@ -262,9 +277,17 @@ bool SCH_EDIT_FRAME::OpenProjectFiles( const std::vector<wxString>& aFileSet, in
 
         if( schFileType == SCH_IO_MGR::SCH_FILE_T::SCH_FILE_UNKNOWN )
         {
-            msg.Printf( _( "'%s' is not a KiCad schematic file.\nUse File -> Import for "
-                           "non-KiCad schematic files." ),
-                        fullFileName );
+            if( aCtl & KICTL_KICAD_ONLY )
+            {
+                msg.Printf( _( "'%s' is not a KiCad schematic file.\nUse File -> Import for "
+                               "non-KiCad schematic files." ),
+                            fullFileName );
+            }
+            else
+            {
+                // Even the non-KiCad plugin type didn't know
+                msg.Printf( _( "'%s' is not a recognised schematic format." ), fullFileName );
+            }
 
             progressReporter.Hide();
             DisplayErrorMessage( this, msg );
@@ -1560,6 +1583,7 @@ bool SCH_EDIT_FRAME::importFile( const wxString& aFileName, int aFileType,
     case SCH_IO_MGR::SCH_GEDA:
     case SCH_IO_MGR::SCH_DIPTRACE:
     case SCH_IO_MGR::SCH_PCAD:
+    case SCH_IO_MGR::SCH_ORCAD:
     {
         // We insist on caller sending us an absolute path, if it does not, we say it's a bug.
         // Unless we are passing the files in aproperties, in which case aFileName can be empty.
@@ -1602,6 +1626,10 @@ bool SCH_EDIT_FRAME::importFile( const wxString& aFileName, int aFileType,
                 // that back to the returned sheet.
                 if( !loadedIsTopLevel && !loadedIsVirtualRoot )
                     Schematic().SetTopLevelSheets( { loadedSheet } );
+
+                // extract a project symbol library and re-link LIB_IDs so every symbol resolves
+                ReconcileImportedSymbols( *pi, Schematic(), Prj(), aFileName, aProperties,
+                                          loadReporter );
 
                 // re-link footprint fields to the project lib so update-from-schematic works
                 {

@@ -22,6 +22,7 @@
 
 add_net
 addsublayer
+affects
 aligned
 allowed
 allow_missing_courtyard
@@ -80,6 +81,7 @@ component_classes
 connect
 connect_pads
 constant
+constraint
 copperpour
 copper_finish
 crossbar
@@ -95,6 +97,7 @@ counterbore
 countersink
 courtyard_line_width
 creepage
+cursor
 data
 date
 defaults
@@ -113,6 +116,7 @@ djordjevic_sarkar
 dnp
 drawings
 drill
+driving
 duplicate_pad_numbers_are_jumpers
 ecc_level
 edge
@@ -132,6 +136,7 @@ exclude_from_pos_files
 exclude_from_bom
 extension_height
 extension_offset
+extent
 external
 extruded
 fab_layers_line_width
@@ -169,6 +174,7 @@ general
 generator
 generator_version
 generated
+grid_item
 grid_origin
 group
 gr_arc
@@ -299,6 +305,7 @@ placed
 placement
 plus
 point
+polar
 polygon
 portrait
 post_machining
@@ -323,6 +330,7 @@ rotate
 rotation_angle
 roundrect
 roundrect_rratio
+routing
 rows
 row_heights
 scale
@@ -347,6 +355,7 @@ solder_paste_margin_ratio
 solder_paste_ratio
 solid
 source
+spacing
 span
 spec_frequency
 stackup
@@ -398,6 +407,7 @@ trapezoid
 thru
 thru_hole
 thru_hole_only
+tick_interval
 true
 tstamp
 type

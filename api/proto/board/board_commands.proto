@@ -27,6 +27,7 @@ import "common/types/enums.proto";
 import "common/types/project_settings.proto";
 import "board/board.proto";
 import "board/board_types.proto";
+import "board/board_jobs.proto";
 
 /*
  * Board stackup and properties
@@ -171,6 +172,16 @@ message BoardLayerNameResponse
   // The name of the layer shown in the KiCad GUI, which may be a default value like "F.Cu" or may
   // have been customized by the user.
   string name = 1;
+}
+
+// Since: 10.0.6
+// Returns BoardLayerResponse
+message GetBoardLayerByName
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+
+  // A name to retrieve the layer ID for, which may be a user-customized or a KiCad standard one.
+  string name = 2;
 }
 
 /*
@@ -511,6 +522,23 @@ message GetBoardEditorAppearanceSettings
 message SetBoardEditorAppearanceSettings
 {
   BoardEditorAppearanceSettings settings = 1;
+}
+
+// Returns BoardPlotSettingsResponse
+message GetBoardPlotSettings
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+}
+
+message SetBoardPlotSettings
+{
+  kiapi.common.types.DocumentSpecifier board = 1;
+  kiapi.board.jobs.BoardPlotSettings plot_settings = 2;
+}
+
+message BoardPlotSettingsResponse
+{
+  kiapi.board.jobs.BoardPlotSettings plot_settings = 1;
 }
 
 //// Interactive commands ////

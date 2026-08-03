@@ -535,9 +535,6 @@ LIB_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseLibSymbol( LIB_SYMBOL_MAP& aSymbolLi
 
             m_bodyStyle = static_cast<int>( tmp );
 
-            if( m_bodyStyle > symbol->GetBodyStyleCount() )
-                symbol->SetBodyStyleCount( m_bodyStyle, false, false );
-
             if( m_unit > symbol->GetUnitCount() )
                 symbol->SetUnitCount( m_unit, false );
 
@@ -663,9 +660,14 @@ LIB_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseLibSymbol( LIB_SYMBOL_MAP& aSymbolLi
             RECURSE_MODE::NO_RECURSE );
 
     // Before V10 we didn't store the number of body styles in a symbol, we just looked at all its
-    // drawings each time we wanted to know.
-    if( m_requiredVersion < 20250827 )
+    // drawings each time we wanted to know.  Symbol libraries kept their old version for a while
+    // after custom body styles landed, so only infer De Morgan when nothing was declared.
+    if( m_requiredVersion < 20250827 && !symbol->IsMultiBodyStyle() )
         symbol->SetHasDeMorganBodyStyles( symbol->HasLegacyAlternateBodyStyle() );
+
+    // The declaration wins over the drawings, which lets libraries written by a version that
+    // failed to delete a body style load without its leftovers
+    symbol->PruneBodyStyleDrawItems( symbol->GetBodyStyleCount() );
 
     symbol->RefreshLibraryTreeCaches();
 
@@ -1278,6 +1280,39 @@ PIN_MAP_INSTANCE_OVERRIDE SCH_IO_KICAD_SEXPR_PARSER::parsePinMapOverride()
     }
 
     return override;
+}
+
+
+LIB_ID SCH_IO_KICAD_SEXPR_PARSER::parseSymbolOverride()
+{
+    wxCHECK_MSG( CurTok() == T_symbol_override, LIB_ID(),
+                 "Cannot parse " + GetTokenString( CurTok() ) + " as a symbol_override token." );
+
+    T token = NextTok();
+
+    if( !IsSymbol( token ) )
+        Expecting( "symbol LIB_ID" );
+
+    wxString name = FromUTF8();
+    LIB_ID   libId;
+    int      bad_pos = libId.Parse( name );
+
+    if( bad_pos >= 0 )
+    {
+        if( static_cast<int>( name.size() ) > bad_pos )
+        {
+            wxString msg = wxString::Format( _( "Variant symbol override contains invalid character '%c'" ),
+                                             name[bad_pos] );
+
+            THROW_PARSE_ERROR( msg, CurSource(), CurLine(), CurLineNumber(), CurOffset() );
+        }
+
+        THROW_PARSE_ERROR( _( "Invalid variant symbol override LIB_ID" ), CurSource(), CurLine(),
+                           CurLineNumber(), CurOffset() );
+    }
+
+    NeedRIGHT();
+    return libId;
 }
 
 
@@ -3811,9 +3846,11 @@ SCH_SYMBOL* SCH_IO_KICAD_SEXPR_PARSER::parseSchematicSymbol()
 
                                 case T_pin_map_override: variant.m_PinMapOverride = parsePinMapOverride(); break;
 
+                                case T_symbol_override: variant.m_SymbolOverride = parseSymbolOverride(); break;
+
                                 default:
                                     Expecting( "dnp, exclude_from_sim, field, in_bom, in_pos_files, name, "
-                                               "on_board, or pin_map_override" );
+                                               "on_board, pin_map_override, or symbol_override" );
                                 }
 
                                 instance.m_Variants[variant.m_Name] = variant;

@@ -787,13 +787,6 @@ TOOL_ACTION SCH_ACTIONS::drawRuleArea( TOOL_ACTION_ARGS()
         .Flags( AF_ACTIVATE )
         .Parameter( SHAPE_T::RECTANGLE ) );
 
-TOOL_ACTION SCH_ACTIONS::deleteLastPoint( TOOL_ACTION_ARGS()
-        .Name( "eeschema.InteractiveDrawing.deleteLastPoint" )
-        .Scope( AS_CONTEXT )
-        .FriendlyName( _( "Delete Last Point" ) )
-        .Tooltip( _( "Delete the last point added to the current item" ) )
-        .Icon( BITMAPS::undo ) );
-
 TOOL_ACTION SCH_ACTIONS::closeOutline( TOOL_ACTION_ARGS()
         .Name( "eeschema.InteractiveDrawing.closeOutline" )
         .Scope( AS_CONTEXT )
@@ -968,6 +961,20 @@ TOOL_ACTION SCH_ACTIONS::updateSymbol( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Update Symbol..." ) )
         .Tooltip( _( "Update symbol to include any changes from the library" ) )
         .Icon( BITMAPS::refresh ) );
+
+TOOL_ACTION SCH_ACTIONS::setVariantSymbol( TOOL_ACTION_ARGS()
+        .Name( "eeschema.InteractiveEdit.setVariantSymbol" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Set Variant Symbol..." ) )
+        .Tooltip( _( "Assign an alternate library symbol for this design variant" ) )
+        .Icon( BITMAPS::exchange ) );
+
+TOOL_ACTION SCH_ACTIONS::clearVariantSymbol( TOOL_ACTION_ARGS()
+        .Name( "eeschema.InteractiveEdit.clearVariantSymbol" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Clear Variant Symbol" ) )
+        .Tooltip( _( "Remove the variant symbol override and revert to the base symbol" ) )
+        .Icon( BITMAPS::cancel ) );
 
 TOOL_ACTION SCH_ACTIONS::assignNetclass( TOOL_ACTION_ARGS()
         .Name( "eeschema.InteractiveEdit.assignNetclass" )
@@ -1837,6 +1844,12 @@ TOOL_ACTION SCH_ACTIONS::toggleDottedSecondary( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Dotted Current/Phase" ) )
         .Tooltip( _( "Draw secondary signal trace (current or phase) with a dotted line" ) ) );
+
+TOOL_ACTION SCH_ACTIONS::toggleSmithChart( TOOL_ACTION_ARGS()
+        .Name( "eeschema.Simulator.toggleSmithChart" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Smith Chart" ) )
+        .Tooltip( _( "Show S-parameter results on a Smith chart" ) ) );
 
 TOOL_ACTION SCH_ACTIONS::toggleDarkModePlots( TOOL_ACTION_ARGS()
         .Name( "eeschema.Simulator.toggleDarkModePlots" )

@@ -34,6 +34,7 @@
 #include <project/project_file.h>
 #include <eeschema_settings.h>
 #include <symbol_editor_settings.h>
+#include <string_utils.h>
 #include <symbol_library_common.h>         // For SYMBOL_LIBRARY_FILTER
 #include <algorithm>
 #include <wx/button.h>
@@ -479,6 +480,18 @@ void PANEL_SYMBOL_CHOOSER::OnDetailsCharHook( wxKeyEvent& e )
 }
 
 
+void PANEL_SYMBOL_CHOOSER::SetCompatibilityCallback( SYMBOL_COMPAT_FUNC aFunc )
+{
+    m_compatCallback = std::move( aFunc );
+
+    if( SYMBOL_TREE_MODEL_ADAPTER* symAdapter =
+            dynamic_cast<SYMBOL_TREE_MODEL_ADAPTER*>( m_adapter.get() ) )
+    {
+        symAdapter->SetCompatibilityCallback( m_compatCallback );
+    }
+}
+
+
 void PANEL_SYMBOL_CHOOSER::SetPreselect( const LIB_ID& aPreselect )
 {
     m_adapter->SetPreselectNode( aPreselect, 0 );
@@ -559,6 +572,7 @@ void PANEL_SYMBOL_CHOOSER::showFootprintFor( LIB_ID const& aLibId )
     SCH_FIELD* fp_field = symbol->GetField( FIELD_T::FOOTPRINT );
     wxString   fp_name = fp_field ? fp_field->GetFullText() : wxString( "" );
 
+    m_fp_override.Empty();
     showFootprint( fp_name );
 }
 
@@ -615,9 +629,12 @@ void PANEL_SYMBOL_CHOOSER::populateFootprintSelector( LIB_ID const& aLibId )
 
     if( symbol != nullptr )
     {
-    int        pinCount = symbol->GetGraphicalPins( 0 /* all units */, 1 /* single bodyStyle */ ).size();
+        int        pinCount = symbol->GetGraphicalPins( 0 /* all units */, 1 /* single bodyStyle */ ).size();
         SCH_FIELD* fp_field = symbol->GetField( FIELD_T::FOOTPRINT );
         wxString   fp_name = fp_field ? fp_field->GetFullText() : wxString( "" );
+
+        if( !m_fp_override.IsEmpty() )
+            fp_name = m_fp_override;
 
         // Explicitly associated footprints (issue #2282) are listed ahead of the glob matches in
         // written order and bypass the pin-count filter; a mapped EP/NC footprint legally has more
@@ -643,10 +660,11 @@ void PANEL_SYMBOL_CHOOSER::onFootprintSelected( wxCommandEvent& aEvent )
 {
     m_fp_override = aEvent.GetString();
 
-    std::erase_if( m_field_edits, []( std::pair<FIELD_T, wxString> const& i )
-                                   {
-                                       return i.first == FIELD_T::FOOTPRINT;
-                                   } );
+    std::erase_if( m_field_edits,
+            []( std::pair<FIELD_T, wxString> const& i )
+            {
+                return i.first == FIELD_T::FOOTPRINT;
+            } );
 
     m_field_edits.emplace_back( std::make_pair( FIELD_T::FOOTPRINT, m_fp_override ) );
 
@@ -663,11 +681,33 @@ void PANEL_SYMBOL_CHOOSER::onSymbolSelected( wxCommandEvent& aEvent )
         m_symbol_preview->DisplaySymbol( node->m_LibId, node->m_Unit );
 
         if( !node->m_Footprint.IsEmpty() )
-            showFootprint( node->m_Footprint );
+        {
+            wxCommandEvent evt( EVT_FOOTPRINT_SELECTED );
+            evt.SetString( node->m_Footprint);
+            onFootprintSelected( evt );
+        }
         else
+        {
             showFootprintFor( node->m_LibId );
+        }
 
         populateFootprintSelector( node->m_LibId );
+
+        if( m_compatCallback && m_details )
+        {
+            std::vector<VARIANT_COMPAT_RESULT> issues = m_compatCallback( node->m_LibId );
+
+            if( !issues.empty() )
+            {
+                wxString html = wxS( "<br><b>" ) + _( "Compatibility Warnings:" ) + wxS( "</b><ul>" );
+
+                for( const VARIANT_COMPAT_RESULT& issue : issues )
+                    html += wxS( "<li>" ) + EscapeHTML( issue.detail ) + wxS( "</li>" );
+
+                html += wxS( "</ul>" );
+                m_details->AppendToPage( html );
+            }
+        }
     }
     else
     {

@@ -39,12 +39,15 @@
 #include <schematic.h>
 #include <sch_symbol.h>
 #include <lib_symbol.h>
+#include <sch_line.h>
+#include <sch_junction.h>
 #include <sch_field.h>
 #include <pin_map.h>
 #include <template_fieldnames.h>
 #include <settings/color_settings.h>
 #include <string_utils.h>
 #include <tool/tool_manager.h>
+#include <tools/sch_actions.h>
 #include <tools/sch_selection_tool.h>
 #include <wildcards_and_files_ext.h>
 #include <wx_filename.h>
@@ -564,6 +567,8 @@ private:
 };
 
 
+bool SCH_PROPERTIES_PANEL::m_selContainsJunctions;
+bool SCH_PROPERTIES_PANEL::m_selContainsWiresOrBuses;
 std::set<wxString> SCH_PROPERTIES_PANEL::m_currentSymbolFieldNames;
 std::set<wxString> SCH_PROPERTIES_PANEL::m_currentSheetFieldNames;
 std::set<wxString> SCH_PROPERTIES_PANEL::m_currentPinMapPinNumbers;
@@ -762,6 +767,8 @@ void SCH_PROPERTIES_PANEL::AfterCommit()
 
 void SCH_PROPERTIES_PANEL::rebuildProperties( const SELECTION& aSelection )
 {
+    m_selContainsJunctions = false;
+    m_selContainsWiresOrBuses = false;
     m_currentSymbolFieldNames.clear();
     m_currentSheetFieldNames.clear();
     m_currentPinMapPinNumbers.clear();
@@ -811,6 +818,38 @@ void SCH_PROPERTIES_PANEL::rebuildProperties( const SELECTION& aSelection )
 
                 m_currentSheetFieldNames.insert( field.GetCanonicalName() );
             }
+        }
+        else if( item->Type() == SCH_JUNCTION_T )
+        {
+            m_selContainsJunctions = true;
+
+            // Dummy property which allows concurrently-selected wires to be edited
+            m_propMgr.AddProperty( new DUMMY_PROPERTY<SCH_JUNCTION, WIRE_STYLE>( _HKI( "Wire Style" ) ) )
+                    .SetAvailableFunc(
+                            []( INSPECTABLE* )
+                            {
+                                return m_selContainsWiresOrBuses;
+                            } );
+
+            // Dummy property which allows concurrently-selected wires to be edited
+            m_propMgr.AddProperty( new DUMMY_PROPERTY<SCH_JUNCTION, int>( _HKI( "Line Width" ) ) )
+                    .SetAvailableFunc(
+                            []( INSPECTABLE* )
+                            {
+                                return m_selContainsWiresOrBuses;
+                            } );
+        }
+        else if( item->IsType( { SCH_ITEM_LOCATE_WIRE_T, SCH_ITEM_LOCATE_BUS_T } ) )
+        {
+            m_selContainsWiresOrBuses = true;
+
+            // Dummy property which allows concurrently-selected junctions to be edited
+            m_propMgr.AddProperty( new DUMMY_PROPERTY<SCH_LINE, int>( _HKI( "Diameter" ) ) )
+                    .SetAvailableFunc(
+                            []( INSPECTABLE* )
+                            {
+                                return m_selContainsJunctions;
+                            } );
         }
     }
 
@@ -946,10 +985,20 @@ void SCH_PROPERTIES_PANEL::onEditPinMap( wxCommandEvent& aEvent )
 
     // The dialog can subsequently invoke a KIWAY_PLAYER as a quasimodal frame, so it must run
     // quasimodally to keep that support working.
-    if( dlg.ShowQuasiModal() == SYMBOL_PROPS_EDIT_OK )
+    int retval = dlg.ShowQuasiModal();
+
+    if( retval == SYMBOL_PROPS_EDIT_OK )
     {
         editFrame->OnModify();
         AfterCommit();
+    }
+    else if( retval == SYMBOL_PROPS_WANT_SET_VARIANT_SYMBOL )
+    {
+        editFrame->GetToolManager()->RunAction( SCH_ACTIONS::setVariantSymbol );
+    }
+    else if( retval == SYMBOL_PROPS_WANT_CLEAR_VARIANT_SYMBOL )
+    {
+        editFrame->GetToolManager()->RunAction( SCH_ACTIONS::clearVariantSymbol );
     }
 }
 

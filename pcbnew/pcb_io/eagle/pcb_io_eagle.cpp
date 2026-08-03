@@ -205,6 +205,14 @@ void ERULES::parse( wxXmlNode* aRules, std::function<void()> aCheckpoint )
                 rlMinPadTop = parseEagle( value );
             else if( name == wxT( "rlMaxPadTop" ) )
                 rlMaxPadTop = parseEagle( value );
+            else if( name == wxT( "rlMinPadInner" ) )
+                rlMinPadInner = parseEagle( value );
+            else if( name == wxT( "rlMaxPadInner" ) )
+                rlMaxPadInner = parseEagle( value );
+            else if( name == wxT( "rlMinPadBottom" ) )
+                rlMinPadBottom = parseEagle( value );
+            else if( name == wxT( "rlMaxPadBottom" ) )
+                rlMaxPadBottom = parseEagle( value );
             else if( name == wxT( "rvViaOuter" ) )
                 value.ToCDouble( &rvViaOuter );
             else if( name == wxT( "rlMinViaOuter" ) )
@@ -360,10 +368,7 @@ BOARD* PCB_IO_EAGLE::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe,
         wxFFileInputStream stream( fn.GetFullPath() );
 
         if( !stream.IsOk() )
-        {
-            THROW_IO_ERROR( wxString::Format( _( "Unable to read file '%s'" ),
-                                              fn.GetFullPath() ) );
-        }
+            THROW_IO_ERRORF( _( "Unable to read file '%s'" ), fn.GetFullPath() );
 
         // The binary parser synthesizes a DOM identical to what the XML loader
         // produces; both paths then share the common tail below. The document
@@ -382,10 +387,7 @@ BOARD* PCB_IO_EAGLE::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe,
             stream.Read( bytes.data(), bytes.size() );
 
             if( stream.LastRead() != bytes.size() )
-            {
-                THROW_IO_ERROR( wxString::Format( _( "Unable to read file '%s'" ),
-                                                  fn.GetFullPath() ) );
-            }
+                THROW_IO_ERRORF( _( "Unable to read file '%s'" ), fn.GetFullPath() );
 
             EAGLE_BIN_PARSER binParser;
             binDocument = binParser.Parse( bytes );
@@ -394,10 +396,7 @@ BOARD* PCB_IO_EAGLE::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe,
         else
         {
             if( !xmlDocument.Load( stream ) )
-            {
-                THROW_IO_ERROR( wxString::Format( _( "Unable to read file '%s'" ),
-                                                  fn.GetFullPath() ) );
-            }
+                THROW_IO_ERRORF( _( "Unable to read file '%s'" ), fn.GetFullPath() );
 
             doc = xmlDocument.GetRoot();
         }
@@ -473,12 +472,7 @@ BOARD* PCB_IO_EAGLE::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe,
     }
     catch( const XML_PARSER_ERROR &exc )
     {
-        wxString errmsg = exc.what();
-
-        errmsg += wxT( "\n@ " );
-        errmsg += m_xpath->Contents();
-
-        THROW_IO_ERROR( errmsg );
+        THROW_IO_ERRORF( wxT( "%s\n@ %s" ), exc.what(), m_xpath->Contents() );
     }
 
     // IO_ERROR exceptions are left uncaught, they pass upwards from here.
@@ -1231,13 +1225,9 @@ void PCB_IO_EAGLE::loadLibrary( wxXmlNode* aLib, const wxString* aLibName )
 
         if( !r.second /* && !( m_props && m_props->Value( "ignore_duplicates" ) ) */ )
         {
-            wxString lib = aLibName ? *aLibName : m_lib_path;
-            const wxString& pkg = pack_ref;
-
-            wxString emsg = wxString::Format( _( "<package> '%s' duplicated in <library> '%s'" ),
-                                              pkg,
-                                              lib );
-            THROW_IO_ERROR( emsg );
+            THROW_IO_ERRORF( _( "<package> '%s' duplicated in <library> '%s'" ),
+                             pack_ref,
+                             aLibName ? *aLibName : m_lib_path );
         }
 
         m_xpath->pop();
@@ -1318,11 +1308,7 @@ void PCB_IO_EAGLE::loadElements( wxXmlNode* aElements )
         auto     it = m_templates.find( pkg_key );
 
         if( it == m_templates.end() )
-        {
-            wxString emsg = wxString::Format( _( "No '%s' package in library '%s'." ),
-                                              e.package, e.library );
-            THROW_IO_ERROR( emsg );
-        }
+            THROW_IO_ERRORF( _( "No '%s' package in library '%s'." ), e.package, e.library );
 
         FOOTPRINT* footprint = static_cast<FOOTPRINT*>( it->second->Duplicate( IGNORE_PARENT_GROUP ) );
 
@@ -1424,7 +1410,7 @@ void PCB_IO_EAGLE::loadElements( wxXmlNode* aElements )
                     nameAttr = &name;
 
                     // do we have a display attribute ?
-                    if( a.display  )
+                    if( a.display )
                     {
                         // Yes!
                         switch( *a.display )
@@ -1478,7 +1464,7 @@ void PCB_IO_EAGLE::loadElements( wxXmlNode* aElements )
                     value = a;
                     valueAttr = &value;
 
-                    if( a.display  )
+                    if( a.display )
                     {
                         // Yes!
                         switch( *a.display )
@@ -1533,6 +1519,7 @@ void PCB_IO_EAGLE::loadElements( wxXmlNode* aElements )
         }
 
         orientFootprintAndText( footprint, e, nameAttr, valueAttr );
+        adjustFootprintForDesignRules( footprint );
 
         // Get next element
         element = element->GetNext();
@@ -1555,9 +1542,9 @@ ZONE* PCB_IO_EAGLE::loadPolygon( wxXmlNode* aPolyNode )
     // unmapped layer must not drop them.
     if( !keepout && layer == UNDEFINED_LAYER )
     {
-        wxLogMessage( wxString::Format( _( "Ignoring a polygon since Eagle layer '%s' (%d) was not mapped" ),
-                                        eagle_layer_name( p.layer ),
-                                        p.layer ) );
+        Report( wxString::Format( _( "Ignoring a polygon since Eagle layer '%s' (%d) was not mapped" ),
+                                  eagle_layer_name( p.layer ),
+                                  p.layer ) , RPT_SEVERITY_INFO );
         return nullptr;
     }
 
@@ -1594,9 +1581,9 @@ ZONE* PCB_IO_EAGLE::loadPolygon( wxXmlNode* aPolyNode )
 
     if( vertices.size() < 3 )
     {
-        wxLogMessage( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): less than 3 vertices" ),
-                                        eagle_layer_name( p.layer ),
-                                        p.layer ) );
+        Report( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): less than 3 vertices" ),
+                                  eagle_layer_name( p.layer ),
+                                  p.layer ) , RPT_SEVERITY_INFO );
         return nullptr;
     }
 
@@ -1640,9 +1627,9 @@ ZONE* PCB_IO_EAGLE::loadPolygon( wxXmlNode* aPolyNode )
 
     if( polygon.OutlineCount() != 1 )
     {
-        wxLogMessage( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): outline count is not 1" ),
-                                        eagle_layer_name( p.layer ),
-                                        p.layer ) );
+        Report( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): outline count is not 1" ),
+                                  eagle_layer_name( p.layer ),
+                                  p.layer ) , RPT_SEVERITY_INFO );
 
         return nullptr;
     }
@@ -1825,6 +1812,61 @@ void PCB_IO_EAGLE::orientFPText( FOOTPRINT* aFootprint, const EELEMENT& e, PCB_T
 }
 
 
+void PCB_IO_EAGLE::adjustFootprintForDesignRules( FOOTPRINT* aFootprint )
+{
+    // If there is no `designrules` section in the board or library file, there is nothing to do.
+    if( !aFootprint || !m_rules )
+        return;
+
+    // Adjust through hole pads per rlMinPadTop, rlMinPadInner, and rlMinPatBottom design rule settings.
+    for( PAD* pad : aFootprint->Pads() )
+    {
+        if( !pad || !pad->HasDrilledHole() || ( pad->GetFrontShape() != PAD_SHAPE::CIRCLE ) )
+            continue;
+
+        int adjustedPadDiameter = 0.0;
+        PADSTACK& padstack = pad->Padstack();
+
+        if( m_rules->rlMinPadTop != 0.0 && padstack.LayerSet().test( F_Cu ) )
+        {
+            adjustedPadDiameter = padstack.Drill().size.x + ( m_rules->rlMinPadTop * 2 );
+
+            if(  ( padstack.Size( F_Cu ).x < adjustedPadDiameter ) )
+                padstack.SetSize( VECTOR2I( adjustedPadDiameter, adjustedPadDiameter ), F_Cu );
+
+            // For normal pad stacks, the first layer defines the pad for all layers.
+            if( padstack.Mode() == PADSTACK::MODE::NORMAL )
+                continue;
+        }
+
+        if( m_rules->rlMinPadBottom != 0.0 && padstack.LayerSet().test( B_Cu ) )
+        {
+            adjustedPadDiameter = padstack.Drill().size.x + ( m_rules->rlMinPadBottom * 2 );
+
+            if( padstack.Size( B_Cu ).x < adjustedPadDiameter )
+                padstack.SetSize( VECTOR2I( adjustedPadDiameter, adjustedPadDiameter ), B_Cu );
+        }
+
+        if( m_rules->rlMinPadInner != 0.0 )
+        {
+            LSET innerLayers = padstack.LayerSet() & LSET::InternalCuMask();
+
+            for( PCB_LAYER_ID layerId : innerLayers.Seq() )
+            {
+                if( !padstack.LayerSet().test( layerId ) )
+                    continue;
+
+                adjustedPadDiameter = padstack.Drill().size.x + ( m_rules->rlMinPadInner * 2 );
+
+                if( padstack.Size( layerId ).x < adjustedPadDiameter )
+                    padstack.SetSize( VECTOR2I( adjustedPadDiameter, adjustedPadDiameter ), layerId );
+            }
+        }
+    }
+}
+
+
+
 FOOTPRINT* PCB_IO_EAGLE::makeFootprint( wxXmlNode* aPackage, const wxString& aPkgName )
 {
     std::unique_ptr<FOOTPRINT> m = std::make_unique<FOOTPRINT>( m_board );
@@ -1884,9 +1926,9 @@ void PCB_IO_EAGLE::packageWire( FOOTPRINT* aFootprint, wxXmlNode* aTree ) const
 
     if( layer == UNDEFINED_LAYER )
     {
-        wxLogMessage( wxString::Format( _( "Ignoring a wire since Eagle layer '%s' (%d) was not mapped" ),
-                                        eagle_layer_name( w.layer ),
-                                        w.layer ) );
+        Report( wxString::Format( _( "Ignoring a wire since Eagle layer '%s' (%d) was not mapped" ),
+                                  eagle_layer_name( w.layer ),
+                                  w.layer ) , RPT_SEVERITY_INFO );
         return;
     }
 
@@ -2052,9 +2094,11 @@ void PCB_IO_EAGLE::packagePad( FOOTPRINT* aFootprint, wxXmlNode* aTree )
         wxFileName fileName( m_lib_path );
 
         if( m_board)
-            wxLogError( _( "Invalid zero-sized pad ignored in\nfile: %s" ), m_board->GetFileName() );
+            Report( wxString::Format( _( "Invalid zero-sized pad ignored in\nfile: %s" ),
+                                      m_board->GetFileName() ), RPT_SEVERITY_ERROR );
         else
-            wxLogError( _( "Invalid zero-sized pad ignored in\nfile: %s" ), fileName.GetFullName() );
+            Report( wxString::Format( _( "Invalid zero-sized pad ignored in\nfile: %s" ),
+                                      fileName.GetFullName() ), RPT_SEVERITY_ERROR );
     }
 }
 
@@ -2066,9 +2110,9 @@ void PCB_IO_EAGLE::packageText( FOOTPRINT* aFootprint, wxXmlNode* aTree ) const
 
     if( layer == UNDEFINED_LAYER )
     {
-        wxLogMessage( wxString::Format( _( "Ignoring a text since Eagle layer '%s' (%d) was not mapped" ),
-                                        eagle_layer_name( t.layer ),
-                                        t.layer ) );
+        Report( wxString::Format( _( "Ignoring a text since Eagle layer '%s' (%d) was not mapped" ),
+                                  eagle_layer_name( t.layer ),
+                                  t.layer ) , RPT_SEVERITY_INFO );
         return;
     }
 
@@ -2165,9 +2209,9 @@ void PCB_IO_EAGLE::packageRectangle( FOOTPRINT* aFootprint, wxXmlNode* aTree ) c
 
         if( layer == UNDEFINED_LAYER )
         {
-            wxLogMessage( wxString::Format( _( "Ignoring a rectangle since Eagle layer '%s' (%d) was not mapped" ),
-                                            eagle_layer_name( r.layer ),
-                                            r.layer ) );
+            Report( wxString::Format( _( "Ignoring a rectangle since Eagle layer '%s' (%d) was not mapped" ),
+                                      eagle_layer_name( r.layer ),
+                                      r.layer ) , RPT_SEVERITY_INFO );
             return;
         }
 
@@ -2227,9 +2271,9 @@ void PCB_IO_EAGLE::packagePolygon( FOOTPRINT* aFootprint, wxXmlNode* aTree ) con
     // than dereferencing an empty vertex list.
     if( vertices.size() < 3 )
     {
-        wxLogMessage( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): less than 3 vertices" ),
-                                        eagle_layer_name( p.layer ),
-                                        p.layer ) );
+        Report( wxString::Format( _( "Skipping a polygon on layer '%s' (%d): less than 3 vertices" ),
+                                  eagle_layer_name( p.layer ),
+                                  p.layer ) , RPT_SEVERITY_INFO );
         return;
     }
 
@@ -2291,9 +2335,9 @@ void PCB_IO_EAGLE::packagePolygon( FOOTPRINT* aFootprint, wxXmlNode* aTree ) con
     {
         if( layer == UNDEFINED_LAYER )
         {
-            wxLogMessage( wxString::Format( _( "Ignoring a polygon since Eagle layer '%s' (%d) was not mapped" ),
-                                            eagle_layer_name( p.layer ),
-                                            p.layer ) );
+            Report( wxString::Format( _( "Ignoring a polygon since Eagle layer '%s' (%d) was not mapped" ),
+                                      eagle_layer_name( p.layer ),
+                                      p.layer ) , RPT_SEVERITY_INFO );
             return;
         }
 
@@ -2367,9 +2411,9 @@ void PCB_IO_EAGLE::packageCircle( FOOTPRINT* aFootprint, wxXmlNode* aTree ) cons
 
         if( layer == UNDEFINED_LAYER )
         {
-            wxLogMessage( wxString::Format( _( "Ignoring a circle since Eagle layer '%s' (%d) was not mapped" ),
-                                            eagle_layer_name( e.layer ),
-                                            e.layer ) );
+            Report( wxString::Format( _( "Ignoring a circle since Eagle layer '%s' (%d) was not mapped" ),
+                                      eagle_layer_name( e.layer ),
+                                      e.layer ) , RPT_SEVERITY_INFO );
             return;
         }
 
@@ -2862,7 +2906,7 @@ void PCB_IO_EAGLE::loadSignals( wxXmlNode* aSignals )
                     VECTOR2I pos( kicad_x( v.x ), kicad_y( v.y ) );
 
                     via->SetLayerPair( layer_front_most, layer_back_most );
-                    via->SetPosition( pos  );
+                    via->SetPosition( pos );
                     via->SetEnd( pos );
 
                     via->SetNetCode( netCode );
@@ -3239,7 +3283,7 @@ void PCB_IO_EAGLE::cacheLib( const wxString& aLibPath )
             wxXmlDocument xmlDocument;
 
             if( !stream.IsOk() || !xmlDocument.Load( stream ) )
-                THROW_IO_ERROR( wxString::Format( _( "Unable to read file '%s'." ), fn.GetFullPath() ) );
+                THROW_IO_ERRORF( _( "Unable to read file '%s'." ), fn.GetFullPath() );
 
             doc = xmlDocument.GetRoot();
 

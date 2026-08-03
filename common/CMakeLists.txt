@@ -150,6 +150,7 @@ set( KICOMMON_SRCS
     jobs/job_registry.cpp
     jobs/jobs_output_archive.cpp
     jobs/jobs_output_folder.cpp
+    jobs/job_export_bom.cpp
     jobs/job_export_pcb_drill.cpp
     jobs/job_export_pcb_dxf.cpp
     jobs/job_export_pcb_gerber.cpp
@@ -167,7 +168,6 @@ set( KICOMMON_SRCS
     jobs/job_export_pcb_svg.cpp
     jobs/job_export_pcb_gencad.cpp
     jobs/job_export_pcb_3d.cpp
-    jobs/job_export_sch_bom.cpp
     jobs/job_export_sch_netlist.cpp
     jobs/job_export_sch_plot.cpp
     jobs/job_export_sch_pythonbom.cpp
@@ -237,6 +237,8 @@ set( KICOMMON_SRCS
     tool/ui/toolbar_configuration.cpp
     tool/ui/toolbar_context_menu_registry.cpp
 
+    dialogs/dialog_fields_table_base.cpp
+    dialogs/dialog_fields_table.cpp
     dialogs/dialog_rc_job.cpp
     dialogs/dialog_rc_job_base.cpp
     dialogs/dialog_restore_local_history.cpp
@@ -570,6 +572,7 @@ set( COMMON_DLG_SRCS
     dialogs/eda_reorderable_list_dialog_base.cpp
     dialogs/eda_view_switcher.cpp
     dialogs/eda_view_switcher_base.cpp
+    dialogs/fields_view_controls_grid_data_model.cpp
     dialogs/hotkey_cycle_popup.cpp
     dialogs/html_message_box.cpp
     dialogs/panel_color_settings_base.cpp
@@ -593,6 +596,8 @@ set( COMMON_DLG_SRCS
     dialogs/panel_maintenance_base.cpp
     dialogs/panel_mouse_settings.cpp
     dialogs/panel_mouse_settings_base.cpp
+    dialogs/panel_snapping.cpp
+    dialogs/panel_snapping_base.cpp
     dialogs/panel_spacemouse.cpp
     dialogs/panel_spacemouse_base.cpp
     dialogs/panel_packages_and_updates.cpp
@@ -694,6 +699,8 @@ set( COMMON_PREVIEW_ITEMS_SRCS
     preview_items/angle_item.cpp
     preview_items/arc_assistant.cpp
     preview_items/arc_geom_manager.cpp
+    preview_items/ellipse_assistant.cpp
+    preview_items/ellipse_geom_manager.cpp
     preview_items/bezier_assistant.cpp
     preview_items/bezier_geom_manager.cpp
     preview_items/centreline_rect_item.cpp
@@ -865,7 +872,7 @@ set( COMMON_SRCS
     tool/common_tools.cpp
     tool/conditional_menu.cpp
     tool/design_block_control.cpp
-    tool/edit_constraints.cpp
+    tool/edit_relations.cpp
     tool/edit_points.cpp
     tool/editor_conditions.cpp
     tool/embed_tool.cpp
@@ -956,6 +963,7 @@ target_link_libraries( common
     kimath
     kinng
     kiplatform
+    snap
     kicommon
     core
     fmt::fmt
@@ -1024,6 +1032,9 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_dimension.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_shape.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_group.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/constraints/constraint_builder.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/constraints/constraint_copy.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/constraints/pcb_constraint.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_marker.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/footprint.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/footprint_courtyard_index.cpp
@@ -1042,6 +1053,7 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_field.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_table.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_tablecell.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/pcb_griditem.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_text.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_textbox.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/project_pcb.cpp

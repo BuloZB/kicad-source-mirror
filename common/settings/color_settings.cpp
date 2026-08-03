@@ -124,6 +124,10 @@ COLOR_SETTINGS::COLOR_SETTINGS( const wxString& aFilename, bool aAbsolutePath ) 
     CLR( "board.anchor",                   LAYER_ANCHOR             );
     CLR( "board.locked_shadow",            LAYER_LOCKED_ITEM_SHADOW );
     CLR( "board.conflicts_shadow",         LAYER_CONFLICTS_SHADOW   );
+    CLR( "board.constraint_shadow",        LAYER_CONSTRAINT_SHADOW  );
+    CLR( "board.constraint_under",         LAYER_CONSTRAINT_UNDER   );
+    CLR( "board.constraint_well",          LAYER_CONSTRAINT_WELL    );
+    CLR( "board.constraint_over",          LAYER_CONSTRAINT_OVER    );
     CLR( "board.aux_items",                LAYER_AUX_ITEMS          );
     CLR( "board.background",               LAYER_PCB_BACKGROUND     );
     CLR( "board.cursor",                   LAYER_CURSOR             );
@@ -145,6 +149,7 @@ COLOR_SETTINGS::COLOR_SETTINGS( const wxString& aFilename, bool aAbsolutePath ) 
     CLR( "board.pad_net_names",            LAYER_PAD_NETNAMES       );
     CLR( "board.via_net_names",            LAYER_VIA_NETNAMES       );
     CLR( "board.points",                   LAYER_POINTS             );
+    CLR( "board.grid_items",               LAYER_GRIDITEMS          );
 
     CLR( "board.copper.f",      F_Cu    );
     CLR( "board.copper.in1",    In1_Cu  );

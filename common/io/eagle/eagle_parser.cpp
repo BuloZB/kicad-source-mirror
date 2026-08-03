@@ -281,7 +281,7 @@ long long int ECOORD::ConvertToNm( int aValue, enum EAGLE_UNIT aUnit )
     }
 
     if( ( ret > 0 ) != ( aValue > 0 ) )
-        wxLogError( _( "Invalid size %lld: too large" ), aValue );
+        wxLogTrace( traceEagleIo, wxT( "Invalid size %d: too large" ), aValue );
 
     return ret;
 }
@@ -521,9 +521,8 @@ VECTOR2I ConvertArcCenter( const VECTOR2I& aStart, const VECTOR2I& aEnd, double 
     {
         // Note that we allow the floating point output here because this message is displayed to the user and should
         // be in their locale.
-        THROW_IO_ERROR( wxString::Format( _( "Invalid Arc with radius %0.2f and angle %0.2f" ), //format:allow
-                                          dlen,
-                                          aAngle ) );
+        THROW_IO_ERRORF( _( "Invalid Arc with radius %0.2f and angle %0.2f" ), //format:allow
+                         dlen, aAngle );
     }
 
     double dist = dlen / ( 2 * tan( DEG2RAD( aAngle ) / 2 ) );

@@ -33,6 +33,7 @@ wxString LayerName( int aLayer )
     switch( aLayer )
     {
     // PCB_LAYER_ID
+    case UNSELECTED_LAYER:
     case UNDEFINED_LAYER:                 return _( "undefined" );
 
     // Copper
@@ -145,6 +146,7 @@ wxString LayerName( int aLayer )
     case LAYER_DRC_HIGHLIGHTED:          return _( "DRC highlighted" );
     case LAYER_ANCHOR:                  return _( "Anchors" );
     case LAYER_POINTS:                  return _( "Points" );
+    case LAYER_GRIDITEMS:               return _( "Grid items" );
     case LAYER_DRAWINGSHEET:            return _( "Drawing sheet" );
     case LAYER_PAGE_LIMITS:             return _( "Page limits" );
     case LAYER_CURSOR:                  return _( "Cursor" );
@@ -155,6 +157,10 @@ wxString LayerName( int aLayer )
     case LAYER_SELECT_OVERLAY:          return _( "Selection highlight" );
     case LAYER_LOCKED_ITEM_SHADOW:      return _( "Locked item shadow" );
     case LAYER_CONFLICTS_SHADOW:        return _( "Courtyard collision shadow" );
+    case LAYER_CONSTRAINT_SHADOW:       return _( "Constrained item shadow" );
+    case LAYER_CONSTRAINT_UNDER:        return _( "Under-constrained tint" );
+    case LAYER_CONSTRAINT_WELL:         return _( "Fully constrained tint" );
+    case LAYER_CONSTRAINT_OVER:         return _( "Over-constrained tint" );
     case LAYER_BOARD_OUTLINE_AREA:      return _( "Board outline area" );
     case NETNAMES_LAYER_ID_START:       return _( "Track net names" );
     case LAYER_PAD_NETNAMES:            return _( "Pad net names" );

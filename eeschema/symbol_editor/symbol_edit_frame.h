@@ -90,16 +90,6 @@ public:
 
     bool CanCloseSymbolFromSchematic( bool doClose );
 
-    /**
-     * The nickname of the current library being edited and empty string if none.
-     */
-    wxString GetCurLib() const;
-
-    /**
-     * Set the current library nickname and returns the old library nickname.
-     */
-    wxString SetCurLib( const wxString& aLibNickname );
-
     LIB_TREE* GetLibTree() const override { return m_treePane->GetLibTree(); }
 
     /**
@@ -295,6 +285,12 @@ public:
     int  GetBodyStyle() const { return m_bodyStyle; }
     void SetBodyStyle( int aBodyStyle );
 
+    void SetDrawSpecificUnit( bool aSpecific ) { m_drawSpecificUnit = aSpecific; }
+    bool GetDrawSpecificUnit() const { return m_drawSpecificUnit; }
+
+    void SetDrawSpecificBodyStyle( bool aSpecific ) { m_drawSpecificBodyStyle = aSpecific; }
+    bool GetDrawSpecificBodyStyle() const { return m_drawSpecificBodyStyle; }
+
     bool GetShowInvisibleFields();
     bool GetShowInvisiblePins();
 
@@ -473,6 +469,8 @@ private:
     // Set up the tool framework
     void setupTools();
 
+    void updateInfoBar();
+
     void saveSymbolCopyAs( bool aOpenCopy );
 
     /**
@@ -488,23 +486,15 @@ private:
     bool saveLibrary( const wxString& aLibrary, bool aNewFile );
 
     /**
-     * Set the current active library to \a aLibrary.
+     * Load a symbol from a library, optionally setting the selected unit and body style.
      *
-     * @param aLibrary the nickname of the library in the symbol library table.  If empty,
-     *                 display list of available libraries to select from.
-     */
-    void SelectActiveLibrary( const wxString& aLibrary = wxEmptyString );
-
-    /**
-     * Load a symbol from the current active library, optionally setting the selected unit
-     * and convert.
-     *
+     * @param aLibName The nickname of the library
      * @param aSymbolName The symbol alias name to load from the current library.
      * @param aUnit Unit to be selected
-     * @param aBodyStyle Convert to be selected
+     * @param aBodyStyle Body style to be selected
      * @return true if the symbol loaded correctly.
      */
-    bool LoadSymbolFromCurrentLib( const wxString& aSymbolName, int aUnit = 0, int aBodyStyle = 0 );
+    bool LoadSymbolFromLib( const wxString& aLibName, const wxString& aSymbolName, int aUnit = 0,  int aBodyStyle = 0 );
 
     /**
      * Create a copy of \a aLibEntry into memory.
@@ -516,8 +506,7 @@ private:
      * @param aBodyStyle the initial DeMorgan variant to show.
      * @return True if a copy of \a aLibEntry was successfully copied.
      */
-    bool LoadOneLibrarySymbolAux( LIB_SYMBOL* aLibEntry, const wxString& aLibrary, int aUnit,
-                                  int aBodyStyle );
+    bool LoadOneLibrarySymbol( LIB_SYMBOL* aLibEntry, const wxString& aLibrary, int aUnit, int aBodyStyle );
 
     ///< Create a backup copy of a file with requested extension.
     bool backupFile( const wxFileName& aOriginalFile, const wxString& aBackupExt );
@@ -542,9 +531,6 @@ private:
     ///< Save the current symbol.
     bool saveCurrentSymbol();
 
-    ///< Store the currently modified symbol in the library manager buffer.
-    void storeCurrentSymbol();
-
     ///< Rename LIB_SYMBOL aliases to avoid conflicts before adding a symbol to a library.
     void ensureUniqueName( LIB_SYMBOL* aSymbol, const wxString& aLibrary );
 
@@ -565,7 +551,7 @@ private:
      *
      * @note The library defined by \a aLibFile must be a KiCad (s-expression) library.
      *
-     * @param aLibNickmane is the nickname of an existing library table entry.
+     * @param aLibNickname is the nickname of an existing library table entry.
      * @param aLibFile is the full path and file name of the symbol library to replace in the
      *                 table.
      * @return true if successful or false if a failure occurs.
@@ -740,6 +726,12 @@ private:
 
     // Show the normal shape (m_bodyStyle <= 1) or the DeMorgan converted shape (m_bodyStyle > 1)
     int         m_bodyStyle;
+
+    // When editing a symbol: only apply new graphic items to the current unit.
+    bool        m_drawSpecificUnit;
+
+    // When editing a symbol: only apply new graphic items to the current body style.
+    bool        m_drawSpecificBodyStyle;
 
     ///< Flag if the symbol being edited was loaded directly from a schematic.
     bool        m_isSymbolFromSchematic;

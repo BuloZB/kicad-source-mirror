@@ -49,6 +49,7 @@
 #include <geometry/shape_utils.h>
 #include <gal/graphics_abstraction_layer.h>
 #include <footprint.h>
+#include <constraints/pcb_constraint.h>
 #include <pad.h>
 #include <netinfo.h>
 #include <layer_pairs.h>
@@ -1002,6 +1003,16 @@ static void pasteFootprintItemsToFootprintEditor( FOOTPRINT* aClipFootprint, BOA
     }
 
     aClipFootprint->Groups().clear();
+
+    // Constraints ride along like the other containers; the KIID remap in placeBoardItems points
+    // their members at the pasted copies.
+    for( PCB_CONSTRAINT* constraint : aClipFootprint->Constraints() )
+    {
+        constraint->SetParent( editorFootprint );
+        aPastedItems.push_back( constraint );
+    }
+
+    aClipFootprint->Constraints().clear();
 }
 
 
@@ -1015,53 +1026,27 @@ void PCB_CONTROL::pruneItemLayers( std::vector<BOARD_ITEM*>& aItems )
         return;
 
     LSET                     enabledLayers = board()->GetEnabledLayers();
+    const int                copperLayers = board()->GetCopperLayerCount();
     std::vector<BOARD_ITEM*> returnItems;
-    bool                     fpItemDeleted = false;
 
     for( BOARD_ITEM* item : aItems )
     {
-        if( item->Type() == PCB_FOOTPRINT_T )
+        if( !item->FitsEnabledLayers( enabledLayers, copperLayers ) )
         {
-            FOOTPRINT* fp = static_cast<FOOTPRINT*>( item );
+            if( EDA_GROUP* parentGroup = item->GetParentGroup() )
+                parentGroup->RemoveItem( item );
 
-            // Items living in a parent footprint are never removed, even if their
-            // layer does not exist in the board editor
-            // Otherwise the parent footprint could be seriously broken especially
-            // if some layers are later re-enabled.
-            // Moreover a fp lives in a fp library, that does not know the enabled
-            // layers of a given board, so fp items are just ignored when on not
-            // enabled layers in board editor
-            returnItems.push_back( fp );
+            continue;
         }
-        else if( item->Type() == PCB_GROUP_T || item->Type() == PCB_GENERATOR_T )
-        {
-            returnItems.push_back( item );
-        }
-        else
-        {
-            LSET allowed = item->GetLayerSet() & enabledLayers;
-            bool item_valid = true;
 
-            // Ensure, for vias, the top and bottom layers are compatible with
-            // the current board copper layers.
-            // Otherwise they must be skipped, even is one layer is valid
-            if( item->Type() == PCB_VIA_T )
-                item_valid = static_cast<PCB_VIA*>( item )->HasValidLayerPair( board()->GetCopperLayerCount() );
+        // Confine a kept item to the layers this board has; a layer-agnostic one has none to confine
+        if( !item->IsLayerAgnostic() )
+            item->SetLayerSet( item->GetLayerSet() & enabledLayers );
 
-            if( allowed.any() && item_valid )
-            {
-                item->SetLayerSet( allowed );
-                returnItems.push_back( item );
-            }
-            else
-            {
-                if( EDA_GROUP* parentGroup = item->GetParentGroup() )
-                    parentGroup->RemoveItem( item );
-            }
-        }
+        returnItems.push_back( item );
     }
 
-    if( ( returnItems.size() < aItems.size() ) || fpItemDeleted )
+    if( returnItems.size() < aItems.size() )
     {
         DisplayError( m_frame, _( "Warning: some pasted items were on layers which are not "
                                   "present in the current board.\n"
@@ -1279,6 +1264,7 @@ int PCB_CONTROL::Paste( const TOOL_EVENT& aEvent )
                 case PCB_DIM_LEADER_T:
                 case PCB_DIM_ORTHOGONAL_T:
                 case PCB_DIM_RADIAL_T:
+                case PCB_POINT_T:
                     clipDrawItem->SetParent( editorFootprint );
                     pastedItems.push_back( clipDrawItem );
                     break;
@@ -1293,9 +1279,19 @@ int PCB_CONTROL::Paste( const TOOL_EVENT& aEvent )
                 }
             }
 
+            // Board-scoped constraints ride along like the footprint-scoped ones above, so a
+            // constrained sketch keeps its relations when pasted into a footprint.  The clipboard
+            // only carries a constraint whose every member was copied, and placeBoardItems repoints
+            // those members at the pasted copies.
+            for( PCB_CONSTRAINT* constraint : clipBoard->Constraints() )
+            {
+                constraint->SetParent( editorFootprint );
+                pastedItems.push_back( constraint );
+            }
+
             // NB: PCB_SHAPE_T actually removes everything in Drawings() (including PCB_TEXTs,
             // PCB_TABLEs, PCB_BARCODEs, dimensions, etc.), not just PCB_SHAPEs.)
-            clipBoard->RemoveAll( { PCB_SHAPE_T } );
+            clipBoard->RemoveAll( { PCB_SHAPE_T, PCB_CONSTRAINT_T } );
 
             clipBoard->Visit(
                     [&]( EDA_ITEM* item, void* testData )
@@ -1975,16 +1971,34 @@ bool PCB_CONTROL::placeBoardItems( BOARD_COMMIT* aCommit, std::vector<BOARD_ITEM
     std::vector<BOARD_ITEM*> itemsToSel;
     itemsToSel.reserve( aItems.size() );
 
+    // Re-UUIDing pasted items breaks any item that references another by KIID (e.g. a constraint's
+    // members); record old -> new so those references can be remapped once every item has its new id.
+    // A grouped shape appears both as a top-level item and as a group child, so reset each item only
+    // once -- a second reset would record a new->newer entry and corrupt the old->new mapping.
+    std::map<KIID, KIID>     idMap;
+    std::set<BOARD_ITEM*>    resetItems;
+
+    auto resetUuidOnce =
+            [&]( BOARD_ITEM* aItem )
+            {
+                if( !resetItems.insert( aItem ).second )
+                    return;
+
+                KIID oldUuid = aItem->m_Uuid;
+                aItem->ResetUuid();
+                idMap[oldUuid] = aItem->m_Uuid;
+            };
+
     for( BOARD_ITEM* item : aItems )
     {
         if( aIsNew )
         {
-            item->ResetUuid();
+            resetUuidOnce( item );
 
             item->RunOnChildren(
-                    []( BOARD_ITEM* aChild )
+                    [&]( BOARD_ITEM* aChild )
                     {
-                        aChild->ResetUuid();
+                        resetUuidOnce( aChild );
                     },
                     RECURSE_MODE::RECURSE );
 
@@ -2036,6 +2050,21 @@ bool PCB_CONTROL::placeBoardItems( BOARD_COMMIT* aCommit, std::vector<BOARD_ITEM
         // then the selection tool will select it for us.
         if( !item->GetParentGroup() || !alg::contains( aItems, item->GetParentGroup()->AsEdaItem() ) )
             itemsToSel.push_back( item );
+    }
+
+    // Now that every pasted item has its new UUID, remap KIID references (e.g. constraint members)
+    // from the old ids to the new ones so they still resolve to the pasted copies.
+    if( aIsNew && !idMap.empty() )
+    {
+        for( BOARD_ITEM* item : aItems )
+        {
+            item->RemapKIIDs( idMap );
+            item->RunOnChildren( [&]( BOARD_ITEM* aChild )
+                                 {
+                                     aChild->RemapKIIDs( idMap );
+                                 },
+                                 RECURSE_MODE::RECURSE );
+        }
     }
 
     // Select the items that should be selected
