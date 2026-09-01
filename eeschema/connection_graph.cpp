@@ -550,7 +550,7 @@ CONNECTION_SUBGRAPH::GetNetclassesForDriver( SCH_ITEM* aItem ) const
                 {
                     SCH_FIELD* field = static_cast<SCH_FIELD*>( aChild );
 
-                    if( field->GetCanonicalName() == wxT( "Netclass" ) )
+                    if( field->GetUntranslatedName() == wxT( "Netclass" ) )
                     {
                         wxString netclass = field->GetShownText( &m_sheet, false );
 
@@ -1395,8 +1395,24 @@ void CONNECTION_GRAPH::updateSymbolConnectivity( const SCH_SHEET_PATH& aSheet, S
 
             for( const wxString& pinNumber : group )
             {
-                if( SCH_PIN* pin = aSymbol->GetPin( pinNumber ) )
-                    pins.emplace_back( pin );
+                SCH_PIN* found = aSymbol->GetPin( pinNumber );
+
+                if( !found )
+                {
+                    // A group member can name one contact of a stacked pin like [A1,A12].
+                    for( SCH_PIN* pin : aSymbol->GetPins( &aSheet ) )
+                    {
+                        if( alg::contains( pin->GetStackedPinNumbers(), pinNumber ) )
+                        {
+                            found = pin;
+                            break;
+                        }
+                    }
+                }
+
+                // Several members can name contacts of the same pin, which must be linked once.
+                if( found && !alg::contains( pins, found ) )
+                    pins.emplace_back( found );
             }
 
             linkPinsInVec( pins );
@@ -5876,6 +5892,12 @@ bool CONNECTION_GRAPH::ercCheckFloatingWires( const CONNECTION_SUBGRAPH* aSubgra
 void CONNECTION_GRAPH::collectBusMemberSiblings( const CONNECTION_SUBGRAPH* aBusParent, const wxString& aMemberName,
                                                  std::unordered_set<const CONNECTION_SUBGRAPH*>& aOut ) const
 {
+    while( aBusParent && aBusParent->m_absorbed )
+        aBusParent = aBusParent->m_absorbed_by;
+
+    if( !aBusParent || !aBusParent->m_driver_connection )
+        return;
+
     auto busBucket = m_net_name_to_subgraphs_map.find( aBusParent->m_driver_connection->Name() );
 
     if( busBucket == m_net_name_to_subgraphs_map.end() )

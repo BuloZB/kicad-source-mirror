@@ -300,6 +300,7 @@ void SCH_PIN::Serialize( google::protobuf::Any& aContainer ) const
     if( !m_alt.IsEmpty() && m_alt != GetBaseName() )
         pin.set_active_alternate( m_alt.ToUTF8() );
 
+    kiapi::common::PackCustomProperties( pin.mutable_custom_properties(), *this );
     aContainer.PackFrom( pin );
 }
 
@@ -339,6 +340,8 @@ bool SCH_PIN::Deserialize( const google::protobuf::Any& aContainer )
         alt.m_Type = FromProtoEnum<ELECTRICAL_PINTYPE>( altProto.electrical_type() );
         alts.emplace( alt.m_Name, alt );
     }
+
+    kiapi::common::UnpackCustomProperties( pin.custom_properties(), *this );
 
     if( m_layoutCache )
         m_layoutCache->MarkDirty( PIN_LAYOUT_CACHE::DIRTY_FLAGS::ALL );
@@ -786,6 +789,27 @@ wxString SCH_PIN::GetEffectivePadNumber( const SCH_SHEET_PATH& aSheet, const wxS
             *aState = PAD_RESOLUTION::IDENTITY;
 
         return pinNumber;
+    }
+
+    // A stacked pin like [A1,A12] names several pads. Match on those.
+    if( aFootprintPadNumbers )
+    {
+        bool                  valid = false;
+        std::vector<wxString> logicalNumbers = ExpandStackedPinNotation( pinNumber, &valid );
+
+        if( valid )
+        {
+            for( const wxString& logicalNumber : logicalNumbers )
+            {
+                if( aFootprintPadNumbers->count( logicalNumber ) )
+                {
+                    if( aState )
+                        *aState = PAD_RESOLUTION::IDENTITY;
+
+                    return pinNumber;
+                }
+            }
+        }
     }
 
     // 3. UNMAPPED, or assumed identity when no footprint is available (the painter path).
@@ -1954,8 +1978,7 @@ int SCH_PIN::compare( const SCH_ITEM& aOther, int aCompareFlags ) const
 {
     // Ignore the UUID here
     // And the position, which we'll do after the number.
-    int retv = SCH_ITEM::compare( aOther, aCompareFlags | SCH_ITEM::COMPARE_FLAGS::EQUALITY
-                                                  | SCH_ITEM::COMPARE_FLAGS::SKIP_TST_POS );
+    int retv = SCH_ITEM::compare( aOther, aCompareFlags & ~( COMPARE_FLAGS::UUID | COMPARE_FLAGS::POSITION ) );
 
     if( retv )
         return retv;

@@ -160,6 +160,7 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
     submenuFabOutputs->Add( PCB_ACTIONS::generateReportFile );
     submenuFabOutputs->Add( PCB_ACTIONS::generateD356File );
     submenuFabOutputs->Add( PCB_ACTIONS::generateBOM );
+    submenuFabOutputs->Add( PCB_ACTIONS::generateBOMLegacy );
     fileMenu->Add( submenuFabOutputs );
 
     fileMenu->AppendSeparator();
@@ -203,6 +204,8 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
     editMenu->Add( PCB_ACTIONS::findByProperties );
 
     editMenu->AppendSeparator();
+    editMenu->Add( PCB_ACTIONS::extendGraphic );
+    editMenu->Add( PCB_ACTIONS::trimGraphic );
     editMenu->Add( PCB_ACTIONS::editTracksAndVias );
     editMenu->Add( PCB_ACTIONS::editTextAndGraphics );
     editMenu->Add( PCB_ACTIONS::editTeardrops );
@@ -298,6 +301,8 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
 
     placeMenu->Add( PCB_ACTIONS::placeFootprint );
     placeMenu->Add( PCB_ACTIONS::drawVia );
+    placeMenu->Add( PCB_ACTIONS::placeViaStack );
+    placeMenu->Add( PCB_ACTIONS::makeViaStack );
     placeMenu->Add( PCB_ACTIONS::drawZone );
     placeMenu->Add( PCB_ACTIONS::drawCopperThievingZone );
     placeMenu->Add( PCB_ACTIONS::drawRuleArea );
@@ -433,6 +438,7 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
     toolsMenu->Add( ACTIONS::showFootprintEditor );
     toolsMenu->Add( PCB_ACTIONS::updateFootprints );
     toolsMenu->Add( PCB_ACTIONS::migrate3DModels );
+    toolsMenu->Add( PCB_ACTIONS::editFootprintFields );
 
     //Zones management
     toolsMenu->AppendSeparator();

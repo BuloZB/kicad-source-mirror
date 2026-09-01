@@ -53,18 +53,22 @@ set( QA_PCBNEW_SRCS
     test_generator_load_save.cpp
     test_glb_utils.cpp
     test_graphics_load_save.cpp
+    test_graphic_extend.cpp
+    test_graphic_trim.cpp
     test_graphics_import_mgr.cpp
     test_group_load_save.cpp
     test_group_mirror.cpp
     test_group_save_perf.cpp
     test_headless_pcb_context.cpp
     test_history_autosave.cpp
+    test_fields_table_presence.cpp
     test_footprint.cpp
     test_footprint_editor_tabs.cpp
     test_footprint_import_reconciler.cpp
     test_footprint_library_adapter.cpp
     test_footprint_load_save.cpp
     test_footprint_realignment.cpp
+    test_cross_probe_selection.cpp
     test_footprint_transform_sync.cpp
     test_footprint_rescue_layer.cpp
     test_issue24735.cpp
@@ -77,7 +81,9 @@ set( QA_PCBNEW_SRCS
     test_ellipse_roundtrip.cpp
     test_custom_pad_primitive_roundtrip.cpp
     test_active_layer_update.cpp
+    test_line_ending_load_save.cpp
     test_lset.cpp
+    test_match_properties.cpp
     test_meander_corner_radius.cpp
     test_odb_dimension_export.cpp
     test_odb_soldermask_shape_export.cpp
@@ -105,6 +111,7 @@ set( QA_PCBNEW_SRCS
     test_pcb_render_settings.cpp
     test_libeval_compiler.cpp
     test_reference_image_load.cpp
+    test_complex_padstack_export.cpp
     test_gencad_export.cpp
     test_idf_export.cpp
     test_d356_export.cpp
@@ -121,18 +128,22 @@ set( QA_PCBNEW_SRCS
     test_pcb_grid_helper.cpp
     test_save_load.cpp
     test_stacked_pin_netlist.cpp
+    test_teardrop_shorts.cpp
     test_teardrop_uuid.cpp
     test_tracks_cleaner.cpp
     test_triangulation.cpp
     test_tuning_pattern_layer.cpp
+    test_via_stitch.cpp
     test_multichannel.cpp
     test_pns_tuning_path_through_pad.cpp
     test_pns_diff_pair_tuning_width.cpp
+    test_pns_via_layer_span.cpp
     test_variant.cpp
     test_text_variable_resolution.cpp
     test_zone.cpp
     test_zone_filler.cpp
     test_poly_simplify.cpp
+    test_pcb_dynamic_properties.cpp
 
     # Net chain roundtrip tests
     net_chains/test_net_chain_terminal_pads.cpp
@@ -157,6 +168,7 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_courtyard_invalid.cpp
     drc/test_drc_courtyard_overlap.cpp
     drc/test_drc_error_limit.cpp
+    drc/test_footprint_courtyard_chaining.cpp
     drc/test_footprint_courtyard_index.cpp
     drc/test_drc_regressions.cpp
     drc/test_drc_issue23469.cpp
@@ -217,6 +229,7 @@ set( QA_PCBNEW_SRCS
     drc/test_drc_invalid_outline_issue24241.cpp
     drc/test_drc_silk_rule_area_issue24177.cpp
     drc/test_drc_annular_overlap_issue24340.cpp
+    drc/test_drc_via_stack.cpp
     drc/test_drc_hole_clearance_issue24355.cpp
     drc/test_drc_hole_to_hole_npth_slot_issue24541.cpp
     drc/test_drc_npth_slot_clearance_issue24799.cpp
@@ -237,6 +250,7 @@ set( QA_PCBNEW_SRCS
     pcb_io/eagle/test_eagle_lbr_import.cpp
     pcb_io/eagle/test_eagle_managed_lib_naming.cpp
     pcb_io/pads/test_pads_import.cpp
+    pcb_io/pads/test_pads_binary_import.cpp
     pcb_io/pads/test_pads_layer_mapper.cpp
     pcb_io/pads/test_pads_arc_structures.cpp
     pcb_io/pads/test_pads_part_structures.cpp
@@ -268,6 +282,8 @@ set( QA_PCBNEW_SRCS
     pcb_io/odbpp/test_odbpp_netlist.cpp
 
     group_saveload.cpp
+    test_via_stack_saveload.cpp
+    test_via_stack_selection.cpp
 
     # Geometric constraint solver (planegcs adapter)
     constraints/test_planegcs_smoke.cpp

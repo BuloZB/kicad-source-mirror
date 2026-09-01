@@ -131,6 +131,7 @@ void SCH_BUS_ENTRY_BASE::Serialize( google::protobuf::Any& aContainer ) const
     if( m_stroke.GetColor() != COLOR4D::UNSPECIFIED )
         PackColor( *stroke->mutable_color(), m_stroke.GetColor() );
 
+    kiapi::common::PackCustomProperties( entry.mutable_custom_properties(), *this );
     aContainer.PackFrom( entry );
 }
 
@@ -154,6 +155,7 @@ bool SCH_BUS_ENTRY_BASE::Deserialize( const google::protobuf::Any& aContainer )
     m_pos = UnpackVector2( entry.position(), schIUScale );
     m_size = UnpackVector2( entry.size(), schIUScale );
     SetLocked( entry.locked() == types::LockedState::LS_LOCKED );
+    kiapi::common::UnpackCustomProperties( entry.custom_properties(), *this );
 
     m_stroke.SetWidth( UnpackDistance( entry.stroke().width(), schIUScale ) );
     m_stroke.SetLineStyle( FromProtoEnum<LINE_STYLE, types::StrokeLineStyle>( entry.stroke().style() ) );
@@ -703,14 +705,14 @@ static struct SCH_BUS_ENTRY_DESC
                              .Map( WIRE_STYLE::DASHDOTDOT, _HKI( "Dash-Dot-Dot" ) );
         }
 
-        propMgr.AddProperty( new PROPERTY_ENUM<SCH_BUS_ENTRY_BASE, WIRE_STYLE>(
-                _HKI( "Wire Style" ), &SCH_BUS_ENTRY_BASE::SetWireStyle, &SCH_BUS_ENTRY_BASE::GetWireStyle ) );
+        propMgr.AddProperty( new PROPERTY_ENUM<SCH_BUS_ENTRY_BASE, WIRE_STYLE>( _HKI( "Wire Style" ),
+                        &SCH_BUS_ENTRY_BASE::SetWireStyle, &SCH_BUS_ENTRY_BASE::GetWireStyle ) );
 
         propMgr.AddProperty( new PROPERTY<SCH_BUS_ENTRY_BASE, int>( _HKI( "Line Width" ),
-                    &SCH_BUS_ENTRY_BASE::SetPenWidth, &SCH_BUS_ENTRY_BASE::GetPenWidth,
-                    PROPERTY_DISPLAY::PT_SIZE ) );
+                        &SCH_BUS_ENTRY_BASE::SetPenWidth, &SCH_BUS_ENTRY_BASE::GetPenWidth,
+                        PROPERTY_DISPLAY::PT_SIZE ) );
 
         propMgr.AddProperty( new PROPERTY<SCH_BUS_ENTRY_BASE, COLOR4D>( _HKI( "Color" ),
-                    &SCH_BUS_ENTRY_BASE::SetBusEntryColor, &SCH_BUS_ENTRY_BASE::GetBusEntryColor ) );
+                        &SCH_BUS_ENTRY_BASE::SetBusEntryColor, &SCH_BUS_ENTRY_BASE::GetBusEntryColor ) );
     }
 } _SCH_BUS_ENTRY_DESC;

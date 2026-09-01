@@ -101,13 +101,9 @@ BOARD* BOARD_ITEM::GetBoard()
 
 BOARD_ITEM::~BOARD_ITEM()
 {
-    // Safety net for paths that free an item without ::Remove().  Gate on the flag so a never-indexed
-    // transient does not walk GetBoard()'s parent chain into an already-freed board.
-    if( m_indexedInBoard && Type() != PCB_T )
-    {
-        if( BOARD* board = GetBoard(); board && board->IsItemIndexedById( this ) )
-            board->UncacheItemByPtr( this );
-    }
+    // Backup for code paths that skip ::Remove(). Do not use the parent chain, it may be freed.
+    if( m_boardCacheOwner )
+        m_boardCacheOwner->UncacheItemByPtr( this );
 }
 
 
@@ -122,7 +118,8 @@ void BOARD_ITEM::SetUuid( const KIID& aUuid )
     if( m_Uuid == aUuid )
         return;
 
-    if( BOARD* board = GetBoard(); board && board->IsItemIndexedById( this ) )
+    // Use the owner, not GetBoard(). The parent chain may name a wrong or dead board.
+    if( BOARD* board = m_boardCacheOwner )
     {
         board->RebindItemUuid( this, aUuid );
         return;
@@ -496,7 +493,7 @@ static struct BOARD_ITEM_DESC
                     &BOARD_ITEM::SetY, &BOARD_ITEM::GetY, PROPERTY_DISPLAY::PT_COORD,
                     ORIGIN_TRANSFORMS::ABS_Y_COORD ) );
         propMgr.AddProperty( new PROPERTY_ENUM<BOARD_ITEM, PCB_LAYER_ID>( _HKI( "Layer" ),
-                    &BOARD_ITEM::SetLayer, &BOARD_ITEM::GetLayer ) );
+                    &BOARD_ITEM::SetLayer, &BOARD_ITEM::GetLayer ) ).SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<BOARD_ITEM, bool>( _HKI( "Locked" ),
                     &BOARD_ITEM::SetLocked, &BOARD_ITEM::IsLocked ) )
                .SetAvailableFunc( isNotFootprintHolder );

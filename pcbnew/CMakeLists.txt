@@ -60,6 +60,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_drc_job_config.cpp
     dialogs/dialog_board_stats_job.cpp
     dialogs/dialog_board_stats_job_base.cpp
+    dialogs/dialog_board_stackup_job.cpp
+    dialogs/dialog_board_stackup_job_base.cpp
     dialogs/dialog_footprint_associations.cpp
     dialogs/dialog_footprint_associations_base.cpp
     dialogs/dialog_footprint_checker.cpp
@@ -74,6 +76,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_exchange_footprints_base.cpp
     dialogs/dialog_export_2581.cpp
     dialogs/dialog_export_2581_base.cpp
+    dialogs/dialog_export_2581_bom.cpp
+    dialogs/dialog_export_2581_bom_base.cpp
     dialogs/dialog_export_idf.cpp
     dialogs/dialog_export_idf_base.cpp
     dialogs/dialog_export_step.cpp
@@ -88,6 +92,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_find_base.cpp
     dialogs/dialog_find_by_properties.cpp
     dialogs/dialog_find_by_properties_base.cpp
+    dialogs/dialog_footprint_fields_table.cpp
+    dialogs/dialog_lib_footprint_fields_table.cpp
     dialogs/dialog_footprint_wizard_list.cpp
     dialogs/dialog_footprint_wizard_list_base.cpp
     dialogs/dialog_gen_footprint_position.cpp
@@ -107,6 +113,9 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_global_edit_teardrops_base.cpp
     dialogs/dialog_global_edit_text_and_graphics.cpp
     dialogs/dialog_global_edit_text_and_graphics_base.cpp
+    dialogs/dialog_griditem_properties.cpp
+    dialogs/dialog_griditem_properties_base.cpp
+    dialogs/geom_field_helpers.cpp
     dialogs/dialog_push_pad_properties.cpp
     dialogs/dialog_push_pad_properties_base.cpp
     dialogs/dialog_shape_properties.cpp
@@ -160,6 +169,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_text_properties_base.cpp
     dialogs/dialog_textbox_properties.cpp
     dialogs/dialog_textbox_properties_base.cpp
+    dialogs/dialog_microvia_stack.cpp
+    dialogs/dialog_microvia_stack_base.cpp
     dialogs/dialog_track_via_properties.cpp
     dialogs/dialog_track_via_properties_base.cpp
     dialogs/dialog_track_via_size.cpp
@@ -170,6 +181,8 @@ set( PCBNEW_DIALOGS
     dialogs/dialog_unused_pad_layers_base.cpp
     dialogs/dialog_update_pcb.cpp
     dialogs/dialog_update_pcb_base.cpp
+    dialogs/dialog_via_stitch_properties.cpp
+    dialogs/dialog_via_stitch_properties_base.cpp
     dialogs/dialog_multichannel_generate_rule_areas_base.cpp
     dialogs/dialog_multichannel_generate_rule_areas.cpp
     dialogs/dialog_multichannel_repeat_layout_base.cpp
@@ -220,6 +233,8 @@ set( PCBNEW_DIALOGS
     dialogs/panel_setup_text_and_graphics_base.cpp
     dialogs/panel_setup_tracks_and_vias.cpp
     dialogs/panel_setup_tracks_and_vias_base.cpp
+    dialogs/panel_setup_via_stacks.cpp
+    dialogs/panel_setup_via_stacks_base.cpp
     dialogs/panel_setup_tuning_patterns.cpp
     dialogs/panel_setup_tuning_patterns_base.cpp
     dialogs/panel_setup_tuning_profiles_base.cpp
@@ -291,6 +306,9 @@ set( PCBNEW_MICROWAVE_SRCS
 
 set( PCBNEW_GENERATORS_SRCS
     generators/pcb_tuning_pattern.cpp
+    generators/pcb_via_stack.cpp
+    generators/pcb_via_stitch.cpp
+    generators/via_stitch_tool.cpp
     )
 
 set( PCBNEW_DRC_SRCS
@@ -322,6 +340,8 @@ set( PCBNEW_DRC_SRCS
     drc/drc_test_provider_track_segment_length.cpp
     drc/drc_test_provider_zone_connections.cpp
     drc/drc_test_provider_via_diameter.cpp
+    drc/drc_test_provider_via_stack.cpp
+    drc/drc_test_provider_via_stitch.cpp
     drc/drc_test_provider_solder_mask.cpp
     drc/drc_test_provider_silk_clearance.cpp
     drc/drc_test_provider_matched_length.cpp
@@ -421,6 +441,7 @@ set( PCBNEW_CLASS_SRCS
     footprint_libraries_utils.cpp
     footprint_viewer_frame.cpp
     fp_tree_model_adapter.cpp
+    footprint_fields_data_model.cpp
     generate_footprint_info.cpp
     graphics_cleaner.cpp
     grid_layer_box_helpers.cpp
@@ -477,12 +498,18 @@ set( PCBNEW_CLASS_SRCS
     tools/drc_tool.cpp
     tools/edit_tool.cpp
     tools/edit_tool_move_fct.cpp
+    tools/graphic_edit.cpp
+    tools/graphic_edit_tool.cpp
+    tools/graphic_extend.cpp
+    tools/graphic_trim.cpp
     tools/pcb_edit_table_tool.cpp
     tools/global_edit_tool.cpp
     tools/footprint_editor_control.cpp
     tools/footprint_chooser_selection_tool.cpp
     tools/footprint_wizard_tools.cpp
+    tools/hover_picker.cpp
     tools/item_modification_routine.cpp
+    tools/match_properties_tool.cpp
     tools/pad_tool.cpp
     tools/pcb_control.cpp
     tools/pcb_design_block_control.cpp

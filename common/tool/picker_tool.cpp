@@ -33,6 +33,7 @@ void PICKER_TOOL_BASE::reset()
     m_picked = std::nullopt;
     m_clickHandler = std::nullopt;
     m_motionHandler = std::nullopt;
+    m_areaHandler = std::nullopt;
     m_cancelHandler = std::nullopt;
     m_finalizeHandler = std::nullopt;
 }
@@ -79,7 +80,7 @@ int PICKER_TOOL::Main( const TOOL_EVENT& aEvent )
 
     const TOOL_EVENT sourceEvent = *aEvent.Parameter<const TOOL_EVENT*>();
 
-    m_frame->PushTool( sourceEvent );
+    SCOPED_TOOL_PUSHER raii( m_frame, sourceEvent );
     Activate();
 
     setControls();
@@ -195,7 +196,6 @@ int PICKER_TOOL::Main( const TOOL_EVENT& aEvent )
 
     reset();
     controls->ForceCursorPosition( false );
-    m_frame->PopTool( sourceEvent );
     return 0;
 }
 

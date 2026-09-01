@@ -373,10 +373,13 @@ bool JSON_SETTINGS::LoadFromFile( const wxString& aDirectory )
     if( success )
         m_fileSynced = true;
 
+    // Skip writeback when running QA tests
+    bool doWrite = m_writeFile && !wxGetEnv( wxT( "KICAD_INHIBIT_SETTINGS_WRITES" ), nullptr );
+
     // If we migrated, clean up the legacy file (with no extension). Save the migrated
     // contents FIRST so that if the save fails we still have the legacy file on disk to
     // fall back to -- otherwise a crash mid-migration leaves the user with neither copy.
-    if( m_writeFile && ( legacy_migrated || migrated ) )
+    if( doWrite && ( legacy_migrated || migrated ) )
     {
         if( m_deleteLegacyAfterMigration )
         {
@@ -526,7 +529,7 @@ bool JSON_SETTINGS::SaveToFile( const wxString& aDirectory, bool aForce )
         {
             nlohmann::json_pointer p = JSON_SETTINGS_INTERNALS::PointerFromString( param->GetJsonPath() );
 
-            toSave[p] = nlohmann::json( {} );
+            toSave[p] = nlohmann::json::object();
         }
     }
 

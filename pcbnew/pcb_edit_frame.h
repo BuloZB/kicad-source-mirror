@@ -60,6 +60,7 @@ class BOARD_NETLIST_UPDATER;
 class ACTION_MENU;
 class TOOL_ACTION;
 class DIALOG_BOARD_SETUP;
+class DIALOG_FOOTPRINT_FIELDS_TABLE;
 class PCB_DESIGN_BLOCK_PANE;
 class PANEL_CONSTRAINTS;
 class WX_INFOBAR;
@@ -71,6 +72,8 @@ class API_HANDLER_COMMON;
 enum LAST_PATH_TYPE : unsigned int;
 
 namespace PCB { struct IFACE; }     // KIFACE is in pcbnew.cpp
+
+wxDECLARE_EVENT( EDA_EVT_PCB_LAST_SCH_SHEET_CHANGED, wxCommandEvent );
 
 /**
  * The main frame for Pcbnew.
@@ -109,12 +112,12 @@ public:
      */
     void ExecuteRemoteCommand( const char* cmdline ) override;
 
+    void HandleRemoteNetHighlight( const std::vector<wxString>& aNetNames );
+
     void KiwayMailIn( KIWAY_MAIL_EVENT& aEvent ) override;
 
-    /**
-     * Used to find items by selection synchronization spec string.
-     */
-    std::vector<BOARD_ITEM*> FindItemsFromSyncSelection( std::string syncStr );
+    void      SetLastSchematicSheetPath( const KIID_PATH& aPath );
+    KIID_PATH GetLastSchematicSheetPath() const { return m_lastSchematicSheetPath; }
 
     /**
      * @return the name of the wxAuiPaneInfo managing the Search panel
@@ -158,6 +161,11 @@ public:
     void UpdateTrackWidthSelectBox( wxChoice* aTrackWidthSelectBox, bool aShowNetclass,
                                     bool aShowEdit );
     void UpdateViaSizeSelectBox( wxChoice* aViaSizeSelectBox, bool aShowNetclass, bool aShowEdit );
+
+    /**
+     * Fill the via stack preset selector with the board's defined presets plus an edit entry.
+     */
+    void UpdateViaStackSelectBox( wxChoice* aViaStackSelectBox );
 
     /**
      * Update the variant selection dropdown with the current board's variant names.
@@ -253,6 +261,10 @@ public:
     void Process_Special_Functions( wxCommandEvent& event );
     void Tracks_and_Vias_Size_Event( wxCommandEvent& event );
 
+    /**
+     * Handle the via stack preset selector on the auxiliary toolbar.
+     */
+    void SelectViaStack_Event( wxCommandEvent& event );
 
 
     /**
@@ -665,6 +677,9 @@ public:
 
     DIALOG_BOOK_REPORTER* GetFootprintDiffDialog();
 
+    DIALOG_FOOTPRINT_FIELDS_TABLE* GetFootprintFieldsTableDialog();
+    bool                           CloseFootprintFieldsTableDialog();
+
     /**
      * Perform auto save when the board has been modified and not saved within the
      * auto save interval.
@@ -785,12 +800,14 @@ protected:
     void saveProjectSettings() override;
 
     void onCloseModelessBookReporterDialogs( wxCommandEvent& aEvent );
+    void onCloseFootprintFieldsTableDialog( wxCommandEvent& aEvent );
 
     void onPluginAvailabilityChanged( wxCommandEvent& aEvt );
 
 public:
     wxChoice* m_SelTrackWidthBox;        // a choice box to display and select current track width
     wxChoice* m_SelViaSizeBox;           // a choice box to display and select current via diameter
+    wxChoice* m_SelViaStackBox;          // a choice box to display and select current via stack preset
     wxChoice* m_CurrentVariantCtrl;      // a choice box to display and select current variant
 
     bool      m_ShowLayerManagerTools;
@@ -840,6 +857,7 @@ private:
     DIALOG_BOOK_REPORTER*      m_inspectConstraintsDlg;
     DIALOG_BOOK_REPORTER*      m_footprintDiffDlg;
     DIALOG_BOARD_SETUP*        m_boardSetupDlg;
+    DIALOG_FOOTPRINT_FIELDS_TABLE* m_footprintFieldsTableDialog;
 
     std::vector<LIB_ID>    m_designBlockHistoryList;
     PCB_DESIGN_BLOCK_PANE* m_designBlocksPane;
@@ -866,6 +884,10 @@ private:
     int               m_crossProbeFlashPhase = 0;      ///< Phase counter
     std::vector<KIID> m_crossProbeFlashItems;          ///< Items to flash (by UUID)
     bool              m_crossProbeFlashing = false;    ///< Currently flashing guard
+
+    // Most recent schematic path (default to root), used in the footprint fields
+    // table to enable the same schematic scope limiting as the symbol fields table
+    KIID_PATH         m_lastSchematicSheetPath;
 
     std::unique_ptr<API_HANDLER_PCB>    m_apiHandler;
     std::unique_ptr<API_HANDLER_COMMON> m_apiHandlerCommon;

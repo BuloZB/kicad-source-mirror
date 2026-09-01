@@ -345,6 +345,17 @@ TOOL_ACTION PCB_ACTIONS::drawPolygon( TOOL_ACTION_ARGS()
         .Flags( AF_ACTIVATE )
         .Parameter( ZONE_MODE::GRAPHIC_POLYGON ) );
 
+TOOL_ACTION PCB_ACTIONS::drawViaStitchArea( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.InteractiveDrawing.drawViaStitchArea" )
+        .Scope( AS_GLOBAL )
+        .DefaultHotkey( MD_SHIFT + MD_CTRL + 'N' )
+        .LegacyHotkeyName( "Draw Via Stitch area" )
+        .FriendlyName( _( "Draw Via Stitch area" ) )
+        .Tooltip( _( "Draw a via stitch area" ) )
+        .Icon( BITMAPS::add_via_stitch )
+        .Flags( AF_ACTIVATE )
+        .Parameter( ZONE_MODE::STITCH ) );
+
 TOOL_ACTION PCB_ACTIONS::drawRectangle( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveDrawing.rectangle" )
         .Scope( AS_GLOBAL )
@@ -588,6 +599,22 @@ TOOL_ACTION PCB_ACTIONS::drawVia( TOOL_ACTION_ARGS()
         .Icon( BITMAPS::add_via )
         .Flags( AF_ACTIVATE ) );
 
+TOOL_ACTION PCB_ACTIONS::placeViaStack( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.InteractiveDrawing.viaStack" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Place Microvia Stack" ) )
+        .Tooltip( _( "Place a stacked or staggered microvia stack" ) )
+        .ToolbarState( TOOLBAR_STATE::TOGGLE )
+        .Icon( BITMAPS::add_via_stack )
+        .Flags( AF_ACTIVATE ) );
+
+TOOL_ACTION PCB_ACTIONS::makeViaStack( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.Generator.makeViaStack" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Create Stack from Selection" ) )
+        .Tooltip( _( "Wrap the selected microvias and traces into a microvia stack" ) )
+        .Icon( BITMAPS::add_via_stack ) );
+
 TOOL_ACTION PCB_ACTIONS::drawRuleArea( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveDrawing.ruleArea" )
         .Scope( AS_GLOBAL )
@@ -807,6 +834,12 @@ TOOL_ACTION PCB_ACTIONS::toggleExcludeFromBOM( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Exclude from Bill of Materials" ) )
         .Tooltip( _( "Toggle the exclude from bill of materials attribute" ) ) );
+
+TOOL_ACTION PCB_ACTIONS::toggleExcludeFromSim( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.InteractiveEdit.toggleExcludeFromSim" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Exclude from Simulation" ) )
+        .Tooltip( _( "Toggle the exclude from simulation attribute" ) ) );
 
 TOOL_ACTION PCB_ACTIONS::toggleExcludeFromPosFiles( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveEdit.toggleExcludeFromPosFiles" )
@@ -1055,6 +1088,20 @@ TOOL_ACTION PCB_ACTIONS::extendLines( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Extend Lines to Meet" ) )
         .Tooltip( _( "Extend lines to meet each other" ) ) );
 
+TOOL_ACTION PCB_ACTIONS::extendGraphic( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.GraphicEdit.extend" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Extend Line or Arc" ) )
+        .Tooltip( _( "Hover a graphical line or arc to extend it until it meets another" ) )
+        .Flags( AF_ACTIVATE ) );
+
+TOOL_ACTION PCB_ACTIONS::trimGraphic( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.GraphicEdit.trim" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Trim Shape" ) )
+        .Tooltip( _( "Hover the part of a graphical shape to remove between the nearest crossings" ) )
+        .Flags( AF_ACTIVATE ) );
+
 TOOL_ACTION PCB_ACTIONS::mergePolygons( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveEdit.mergePolygons" )
         .Scope( AS_GLOBAL )
@@ -1094,6 +1141,21 @@ TOOL_ACTION PCB_ACTIONS::properties( TOOL_ACTION_ARGS()
         .LegacyHotkeyName( "Edit Item" )
         .FriendlyName( _( "Properties..." ) )
         .Icon( BITMAPS::edit ) );
+
+TOOL_ACTION PCB_ACTIONS::matchProperties( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.MatchProperties.match" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Match Properties" ) )
+        .Tooltip( _( "Copy selected properties from a source item to compatible target items" ) )
+        .Flags( AF_ACTIVATE ) );
+
+// Context scope so the hotkey only takes over from Preferences while the tool has the pointer.
+TOOL_ACTION PCB_ACTIONS::matchPropertiesSettings( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.MatchProperties.settings" )
+        .Scope( AS_CONTEXT )
+        .DefaultHotkey( MD_CTRL + ',' )
+        .FriendlyName( _( "Match Properties Settings..." ) )
+        .Tooltip( _( "Choose the properties copied by Match Properties" ) ) );
 
 // ARRAY
 //
@@ -1188,6 +1250,13 @@ TOOL_ACTION PCB_ACTIONS::compareFpLibraryWithFile( TOOL_ACTION_ARGS()
         .Tooltip( _( "Diff the current footprint library against another .pretty directory" ) )
         .Icon( BITMAPS::library ) );
 
+TOOL_ACTION PCB_ACTIONS::showLibFootprintFieldsTable( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.ModuleEditor.showLibraryFootprintFieldsTable" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Bulk Edit Footprint Fields..." ) )
+        .Tooltip( _( "Edit a table of fields from all footprints in the library" ) )
+        .Icon( BITMAPS::table ) );
+
 TOOL_ACTION PCB_ACTIONS::footprintProperties( TOOL_ACTION_ARGS()
         .Name( "pcbnew.ModuleEditor.footprintProperties" )
         .Scope( AS_GLOBAL )
@@ -1199,7 +1268,7 @@ TOOL_ACTION PCB_ACTIONS::padTable( TOOL_ACTION_ARGS()
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Pad Table..." ) )
         .Tooltip( _( "Displays pad table for bulk editing of pads" ) )
-        .Icon( BITMAPS::pin_table ) );
+        .Icon( BITMAPS::pad_table ) );
 
 TOOL_ACTION PCB_ACTIONS::checkFootprint( TOOL_ACTION_ARGS()
         .Name( "pcbnew.ModuleEditor.checkFootprint" )
@@ -1514,6 +1583,13 @@ TOOL_ACTION PCB_ACTIONS::exportSpecctraDSN( TOOL_ACTION_ARGS()
         .Tooltip( _( "Export Specctra DSN routing info" ) )
         .Icon( BITMAPS::export_dsn ) );
 
+TOOL_ACTION PCB_ACTIONS::editFootprintFields( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.EditorControl.editFootprintFields" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Bulk Edit Footprint Fields..." ) )
+        .Tooltip( _( "Edit a table of fields from all footprints in the board" ) )
+        .Icon( BITMAPS::spreadsheet ) );
+
 TOOL_ACTION PCB_ACTIONS::generateGerbers( TOOL_ACTION_ARGS()
         .Name( "pcbnew.EditorControl.generateGerbers" )
         .Scope( AS_GLOBAL )
@@ -1569,6 +1645,13 @@ TOOL_ACTION PCB_ACTIONS::generateBOM( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Bill of Materials..." ) )
         .Tooltip( _( "Create bill of materials from board" ) )
         .Icon( BITMAPS::post_bom ) );
+
+TOOL_ACTION PCB_ACTIONS::generateBOMLegacy( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.EditorControl.generateBOMLegacy" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Generate Legacy Bill of Materials..." ) )
+        .Tooltip( _( "Generate a bill of materials for the current board using the legacy exporter" ) )
+        .Icon( BITMAPS::file_bom ) );
 
 TOOL_ACTION PCB_ACTIONS::exportGenCAD( TOOL_ACTION_ARGS()
         .Name( "pcbnew.EditorControl.exportGenCAD" )
@@ -3010,6 +3093,15 @@ TOOL_ACTION PCB_ACTIONS::routerAutorouteSelected( TOOL_ACTION_ARGS()
         .Flags( AF_ACTIVATE )
         .Parameter( PNS::PNS_MODE_ROUTE_SINGLE ) );
 
+TOOL_ACTION PCB_ACTIONS::routerOptimizeSelected( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.InteractiveRouter.OptimizeSelected" )
+        .Scope( AS_GLOBAL )
+        .DefaultHotkey( MD_SHIFT + 'T' )
+        .FriendlyName( _( "Optimize Selected Track(s)" ) )
+        .Tooltip( _( "Simplify selected routed track(s)." ) )
+        .Flags( AF_ACTIVATE )
+        .Parameter( PNS::PNS_MODE_ROUTE_SINGLE ) );
+
 TOOL_ACTION PCB_ACTIONS::cancelCurrentItem( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveRouter.CancelCurrentItem" )
         .Scope( AS_GLOBAL )
@@ -3096,6 +3188,20 @@ TOOL_ACTION PCB_ACTIONS::generatorsShowManager( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Generators Manager" ) )
         .Tooltip( _( "Show a manager dialog for Generator objects" ) )
         .Icon( BITMAPS::pin_table ) );
+
+TOOL_ACTION PCB_ACTIONS::excludeStitchVia( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.Generator.excludeStitchVia" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Exclude From Stitching" ) )
+        .Tooltip( _( "Remove the selected via from its via-stitch generator and prevent "
+                     "it from being regenerated" ) ) );
+
+TOOL_ACTION PCB_ACTIONS::clearStitchViaExclusions( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.Generator.clearStitchViaExclusions" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Clear Via Stitching Exclusions" ) )
+        .Tooltip( _( "Restore all vias previously excluded from the selected via-stitch "
+                     "generators" ) ) );
 
 
 // LENGTH_TUNER_TOOL

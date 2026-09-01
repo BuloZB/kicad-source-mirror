@@ -169,6 +169,8 @@ wxVariant DIALOG_FIND_BY_PROPERTIES::getVariantAwareValue( EDA_ITEM* aItem, PROP
                 return wxVariant( footprint->GetDNPForVariant( variantName ) );
             else if( propName == _HKI( "Exclude From Bill of Materials" ) )
                 return wxVariant( footprint->GetExcludedFromBOMForVariant( variantName ) );
+            else if( propName == _HKI( "Exclude From Simulation" ) )
+                return wxVariant( footprint->GetExcludedFromSimForVariant( variantName ) );
             else if( propName == _HKI( "Exclude From Position Files" ) )
                 return wxVariant( footprint->GetExcludedFromPosFilesForVariant( variantName ) );
         }
@@ -226,7 +228,7 @@ std::set<wxString> getCommonFootprintFieldNames( const PCB_SELECTION& aSelection
         for( PCB_FIELD* field : footprint->GetFields() )
         {
             if( field )
-                fieldNames.insert( field->GetCanonicalName() );
+                fieldNames.insert( field->GetUntranslatedName() );
         }
 
         if( firstFootprint )
@@ -558,7 +560,7 @@ void DIALOG_FIND_BY_PROPERTIES::rebuildPropertyGrid()
 
         for( EDA_ITEM* item : selection )
         {
-            PROPERTY_BASE* itemProp = propMgr.GetProperty( TYPE_HASH( *item ), name );
+            PROPERTY_BASE* itemProp = propMgr.GetProperty( item, name );
 
             if( !itemProp )
             {
@@ -854,7 +856,7 @@ bool DIALOG_FIND_BY_PROPERTIES::itemMatchesPropertyCriteria( BOARD_ITEM* aItem )
         }
         else
         {
-            PROPERTY_BASE* prop = propMgr.GetProperty( TYPE_HASH( *aItem ), row.propertyName );
+            PROPERTY_BASE* prop = propMgr.GetProperty( aItem, row.propertyName );
 
             if( !prop )
                 return false;

@@ -366,6 +366,12 @@ public:
     PCB_VIA( const PCB_VIA& aOther );
     PCB_VIA& operator=( const PCB_VIA &aOther );
 
+    /**
+     * Runs of microvias that land on one another, each ordered from its outermost hop down.
+     * A run of one is left out, so an entry is a stack whether or not a generator built it.
+     */
+    static std::vector<std::vector<PCB_VIA*>> CollectMicroviaColumns( BOARD* aBoard );
+
     void CopyFrom( const BOARD_ITEM* aOther ) override;
 
     bool IsType( const std::vector<KICAD_T>& aScanTypes ) const override
@@ -468,6 +474,8 @@ public:
 
     const BOX2I GetBoundingBox() const override;
     const BOX2I GetBoundingBox( PCB_LAYER_ID aLayer ) const;
+
+    void SetPadstackMode( PADSTACK::MODE aMode ) { m_padStack.SetMode( aMode ); }
 
     void SetWidth( int aWidth ) override;
     int GetWidth() const override;
@@ -851,6 +859,6 @@ private:
 
     bool         m_isFree;                   ///< "Free" vias don't get their nets auto-updated
 
-    std::mutex                                  m_zoneLayerOverridesMutex;
+    mutable std::mutex                          m_zoneLayerOverridesMutex;
     std::map<PCB_LAYER_ID, ZONE_LAYER_OVERRIDE> m_zoneLayerOverrides;
 };

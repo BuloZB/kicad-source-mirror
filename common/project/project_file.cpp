@@ -63,6 +63,43 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
     m_params.emplace_back( new PARAM_WXSTRING_MAP( "text_variables",
             &m_TextVars, {}, false, true /* array behavior, even though stored as a map */ ) );
 
+    m_params.emplace_back( new PARAM_LAMBDA<nlohmann::json>( "schematic.drawing.field_names",
+            [&]() -> nlohmann::json
+            {
+                nlohmann::json ret = nlohmann::json::array();
+
+                for( const TEMPLATE_FIELDNAME& field :
+                     m_TemplateFieldNames.GetTemplateFieldNames( TEMPLATES::SCOPE::PROJECT ) )
+                {
+                    ret.push_back( nlohmann::json( {
+                                { "name",    field.m_Name },
+                                { "visible", field.m_Visible },
+                                { "url",     field.m_URL }
+                            } ) );
+                }
+
+                return ret;
+            },
+            [&]( const nlohmann::json& aJson )
+            {
+                if( !aJson.empty() && aJson.is_array() )
+                {
+                    m_TemplateFieldNames.DeleteFieldNameTemplates( TEMPLATES::SCOPE::PROJECT );
+
+                    for( const nlohmann::json& entry : aJson )
+                    {
+                        if( entry.contains( "name" ) && entry.contains( "url" )
+                                && entry.contains( "visible" ) )
+                        {
+                            TEMPLATE_FIELDNAME field( entry["name"].get<wxString>() );
+                            field.m_URL     = entry["url"].get<bool>();
+                            field.m_Visible = entry["visible"].get<bool>();
+                            m_TemplateFieldNames.AddTemplateFieldName( field, TEMPLATES::SCOPE::PROJECT );
+                        }
+                    }
+                }
+            }, {} ) );
+
     m_params.emplace_back( new PARAM_LIST<wxString>( "libraries.pinned_symbol_libs",
             &m_PinnedSymbolLibs, {} ) );
 
@@ -138,7 +175,7 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
             },
             [&]( const nlohmann::json& aJson )
             {
-                if( aJson.empty() || !aJson.is_object() )
+                if( !aJson.is_object() )
                     return;
 
                 m_BusAliases.clear();
@@ -169,6 +206,9 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
                         m_BusAliases.emplace( name, std::move( members ) );
                 }
             }, {} ) );
+
+    // Let the save drop deleted aliases instead of merging them back in
+    m_params.back()->SetClearUnknownKeys();
 
     m_NetSettings = std::make_shared<NET_SETTINGS>( this, "net_settings" );
 
@@ -205,6 +245,18 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
 
     m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.sch_revision",
             &m_IP2581Bom.schRevision, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.mode",
+            &m_IP2581Bom.mode, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.sections",
+            &m_IP2581Bom.sections, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.net_names",
+            &m_IP2581Bom.netNames, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.ref_des",
+            &m_IP2581Bom.refDes, wxEmptyString ) );
 
 
     registerMigration( 1, 2, std::bind( &PROJECT_FILE::migrateSchema1To2, this ) );

@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
+#include <utility>   // std::as_const
 
 #include <wx/log.h>
 #include <wx/debug.h>
@@ -42,7 +43,9 @@
 #include <convert_shape_list_to_polygon.h>
 #include <component_classes/component_class.h>
 #include <component_classes/component_class_cache_proxy.h>
+#include <core/kicad_algo.h>
 #include <drc/drc_item.h>
+#include <diff_merge/property_value_converter.h>
 #include <embedded_files.h>
 #include <font/font.h>
 #include <font/outline_font.h>
@@ -78,6 +81,82 @@
 #include <api/api_pcb_utils.h>
 #include <properties/property.h>
 #include <properties/property_mgr.h>
+
+
+class PCB_FOOTPRINT_FIELD_PROPERTY : public PROPERTY_BASE
+{
+public:
+    PCB_FOOTPRINT_FIELD_PROPERTY( const wxString& aName ) :
+            PROPERTY_BASE( aName ),
+            m_name( aName )
+    {
+        SetGroup( _HKI( "Fields" ) );
+    }
+
+    size_t OwnerHash() const override { return TYPE_HASH( FOOTPRINT ); }
+    size_t BaseHash() const override { return TYPE_HASH( FOOTPRINT ); }
+    size_t TypeHash() const override { return TYPE_HASH( wxString ); }
+
+    void setter( void* obj, wxAny& v ) override
+    {
+        wxString value;
+
+        if( !v.GetAs( &value ) )
+            return;
+
+        FOOTPRINT* footprint = reinterpret_cast<FOOTPRINT*>( obj );
+        PCB_FIELD* field = footprint->GetField( m_name );
+
+        wxString variantName;
+
+        if( footprint->GetBoard() )
+            variantName = footprint->GetBoard()->GetCurrentVariant();
+
+        if( !variantName.IsEmpty() )
+        {
+            FOOTPRINT_VARIANT* variant = footprint->AddVariant( variantName );
+
+            if( variant )
+                variant->SetFieldValue( m_name, value );
+        }
+        else if( !field )
+        {
+            PCB_FIELD* newField = new PCB_FIELD( footprint, FIELD_T::USER, m_name );
+            newField->SetText( value );
+            footprint->Add( newField );
+        }
+        else
+        {
+            field->SetText( value );
+        }
+    }
+
+    wxAny getter( const void* obj ) const override
+    {
+        const FOOTPRINT* footprint = reinterpret_cast<const FOOTPRINT*>( obj );
+        PCB_FIELD* field = footprint->GetField( m_name );
+
+        if( !field )
+            return wxAny();
+
+        wxString variantName;
+
+        if( footprint->GetBoard() )
+            variantName = footprint->GetBoard()->GetCurrentVariant();
+
+        wxString text;
+
+        if( !variantName.IsEmpty() )
+            text = footprint->GetFieldValueForVariant( variantName, m_name );
+        else
+            text = field->GetText();
+
+        return wxAny( text );
+    }
+
+private:
+    wxString m_name;
+};
 
 
 FOOTPRINT::FOOTPRINT( BOARD* parent ) :
@@ -182,6 +261,9 @@ FOOTPRINT::FOOTPRINT( const FOOTPRINT& aFootprint ) :
             PCB_FIELD* existingField = GetField( field->GetId() );
             ptrMap[field] = existingField;
             *existingField = *field;
+
+            // Assignment retains the constructor-generated KIID because m_Uuid is const
+            existingField->SetUuidDirect( field->m_Uuid );
             existingField->SetParent( this );
         }
         else
@@ -309,9 +391,70 @@ FOOTPRINT::~FOOTPRINT()
         delete d;
 
     m_drawings.clear();
+}
 
-    if( BOARD* board = GetBoard() )
-        board->IncrementTimeStamp();
+
+std::vector<PROPERTY_BASE*> FOOTPRINT::GetDynamicProperties() const
+{
+    std::vector<PROPERTY_BASE*> props;
+    const BOARD* board = GetBoard();
+    bool isFPedit = board && board->IsFootprintHolder();
+
+    auto getOrCreate = [&]( const wxString& aName )
+    {
+        auto it = m_dynamicPropertyCache.find( aName );
+
+        if( it == m_dynamicPropertyCache.end() )
+        {
+            auto prop = std::make_unique<PCB_FOOTPRINT_FIELD_PROPERTY>( aName );
+            it = m_dynamicPropertyCache.emplace( aName, std::move( prop ) ).first;
+        }
+
+        return it->second.get();
+    };
+
+    for( PCB_FIELD* field : GetFields() )
+    {
+        if( !field->IsMandatory() )
+            continue;
+
+        if( !isFPedit && field->IsPrivate() )
+            continue;
+
+        const wxString& name = field->GetUntranslatedName();
+
+        if( PROPERTY_MANAGER::Instance().GetProperty( TYPE_HASH( FOOTPRINT ), name ) )
+            continue;
+
+        props.push_back( getOrCreate( name ) );
+    }
+
+    std::vector<PCB_FIELD*> userFields;
+
+    for( PCB_FIELD* field : GetFields() )
+    {
+        if( field->IsMandatory() || ( !isFPedit && field->IsPrivate() ) )
+            continue;
+
+        userFields.push_back( field );
+    }
+
+    std::ranges::sort( userFields,
+                       []( const PCB_FIELD* a, const PCB_FIELD* b )
+                       {
+                           return a->GetUntranslatedName().CmpNoCase( b->GetUntranslatedName() ) < 0;
+                       } );
+
+    for( PCB_FIELD* field : userFields )
+    {
+        const wxString& name = field->GetUntranslatedName();
+        props.push_back( getOrCreate( name ) );
+    }
+
+    for( PROPERTY_BASE* prop : GetCustomPropertiesAsInspectables() )
+        props.push_back( prop );
+
+    return props;
 }
 
 
@@ -331,21 +474,17 @@ void FOOTPRINT::Serialize( google::protobuf::Any &aContainer ) const
     if( const BOARD* board = GetBoard() )
         footprint.mutable_parent()->set_value( board->m_Uuid.AsStdString() );
 
-    google::protobuf::Any buf;
-    GetField( FIELD_T::REFERENCE )->Serialize( buf );
-    buf.UnpackTo( footprint.mutable_reference_field() );
-    GetField( FIELD_T::VALUE )->Serialize( buf );
-    buf.UnpackTo( footprint.mutable_value_field() );
-    GetField( FIELD_T::DATASHEET )->Serialize( buf );
-    buf.UnpackTo( footprint.mutable_datasheet_field() );
-    GetField( FIELD_T::DESCRIPTION )->Serialize( buf );
-    buf.UnpackTo( footprint.mutable_description_field() );
+    GetField( FIELD_T::REFERENCE )->Serialize( *footprint.mutable_reference_field() );
+    GetField( FIELD_T::VALUE )->Serialize( *footprint.mutable_value_field() );
+    GetField( FIELD_T::DATASHEET )->Serialize( *footprint.mutable_datasheet_field() );
+    GetField( FIELD_T::DESCRIPTION )->Serialize( *footprint.mutable_description_field() );
 
     types::FootprintAttributes* attrs = footprint.mutable_attributes();
 
     attrs->set_not_in_schematic( IsBoardOnly() );
     attrs->set_exclude_from_position_files( IsExcludedFromPosFiles() );
     attrs->set_exclude_from_bill_of_materials( IsExcludedFromBOM() );
+    attrs->set_exclude_from_simulation( IsExcludedFromSim() );
     attrs->set_exempt_from_courtyard_requirement( AllowMissingCourtyard() );
     attrs->set_do_not_populate( IsDNP() );
     attrs->set_allow_soldermask_bridges( AllowSolderMaskBridges() );
@@ -427,6 +566,12 @@ void FOOTPRINT::Serialize( google::protobuf::Any &aContainer ) const
         item->Serialize( *itemMsg );
     }
 
+    for( const PCB_POINT* item : Points() )
+    {
+        google::protobuf::Any* itemMsg = def->add_items();
+        item->Serialize( *itemMsg );
+    }
+
     for( const ZONE* item : Zones() )
     {
         google::protobuf::Any* itemMsg = def->add_items();
@@ -452,6 +597,9 @@ void FOOTPRINT::Serialize( google::protobuf::Any &aContainer ) const
     footprint.set_symbol_sheet_filename( m_sheetfile.ToUTF8() );
     footprint.set_symbol_footprint_filters( m_filters.ToUTF8() );
 
+    kiapi::board::PackEmbeddedFiles( *footprint.mutable_embedded_files(), *this );
+
+    kiapi::common::PackCustomProperties( footprint.mutable_custom_properties(), *this );
     aContainer.PackFrom( footprint );
 }
 
@@ -523,6 +671,7 @@ bool FOOTPRINT::Deserialize( const google::protobuf::Any &aContainer )
 
     SetBoardOnly( footprint.attributes().not_in_schematic() );
     SetExcludedFromBOM( footprint.attributes().exclude_from_bill_of_materials() );
+    SetExcludedFromSim( footprint.attributes().exclude_from_simulation() );
     SetExcludedFromPosFiles( footprint.attributes().exclude_from_position_files() );
     SetAllowMissingCourtyard( footprint.attributes().exempt_from_courtyard_requirement() );
     SetDNP( footprint.attributes().do_not_populate() );
@@ -668,6 +817,11 @@ bool FOOTPRINT::Deserialize( const google::protobuf::Any &aContainer )
             Add( item.release(), ADD_MODE::APPEND );
     }
 
+    kiapi::common::UnpackCustomProperties( footprint.custom_properties(), *this );
+
+    if( !kiapi::board::UnpackEmbeddedFiles( *this, footprint.embedded_files() ) )
+        return false;
+
     return true;
 }
 
@@ -737,6 +891,54 @@ void FOOTPRINT::GetFields( std::vector<PCB_FIELD*>& aVector, bool aVisibleOnly )
                {
                    return lhs->GetOrdinal() < rhs->GetOrdinal();
                } );
+}
+
+
+void FOOTPRINT::UpdateFields( const std::vector<PCB_FIELD>& aFields, std::vector<PCB_FIELD*>& aAdded,
+                              std::vector<PCB_FIELD*>& aDetached )
+{
+    std::deque<PCB_FIELD*> updated;
+
+    for( const PCB_FIELD& field : aFields )
+    {
+        PCB_FIELD* live = nullptr;
+
+        // The const overload reports a missing mandatory field instead of quietly creating one
+        if( field.IsMandatory() )
+            live = const_cast<PCB_FIELD*>( std::as_const( *this ).GetField( field.GetId() ) );
+
+        if( live )
+        {
+            *live = field;
+            live->ClearEditFlags();
+            live->SetParent( this );
+        }
+        else
+        {
+            live = field.CloneField();
+            aAdded.push_back( live );
+        }
+
+        updated.push_back( live );
+    }
+
+    for( PCB_FIELD* field : m_fields )
+    {
+        if( !alg::contains( updated, field ) )
+            aDetached.push_back( field );
+    }
+
+    // Add() and Remove() carry the board's item-by-id cache and the geometry caches with them
+    for( PCB_FIELD* field : aDetached )
+        Remove( field );
+
+    for( PCB_FIELD* field : aAdded )
+        Add( field );
+
+    // Add() appends, so restore the order the caller asked for
+    m_fields = std::move( updated );
+
+    InvalidateGeometryCaches();
 }
 
 
@@ -1164,6 +1366,17 @@ bool FOOTPRINT::IsConflicting() const
 }
 
 
+bool FOOTPRINT::IsWithinSchematicSheet( const KIID_PATH& aSheetPath ) const
+{
+    if( aSheetPath.empty() )
+        return false;
+
+    // m_path is written by the netlist, which omits the root sheet the way PathAsString() does
+    return m_path.size() >= aSheetPath.size() - 1
+           && std::equal( aSheetPath.begin() + 1, aSheetPath.end(), m_path.begin() );
+}
+
+
 void FOOTPRINT::GetContextualTextVars( wxArrayString* aVars ) const
 {
     aVars->push_back( wxT( "REFERENCE" ) );
@@ -1175,22 +1388,48 @@ void FOOTPRINT::GetContextualTextVars( wxArrayString* aVars ) const
     aVars->push_back( wxT( "NET_NAME(<pad_number>)" ) );
     aVars->push_back( wxT( "NET_CLASS(<pad_number>)" ) );
     aVars->push_back( wxT( "PIN_NAME(<pad_number>)" ) );
+    aVars->push_back( wxT( "EXCLUDE_FROM_BOM" ) );
+    aVars->push_back( wxT( "EXCLUDE_FROM_BOARD" ) );
+    aVars->push_back( wxT( "EXCLUDE_FROM_SIM" ) );
+    aVars->push_back( wxT( "EXCLUDE_FROM_POS_FILES" ) );
+    aVars->push_back( wxT( "DNP" ) );
 }
 
 
 bool FOOTPRINT::ResolveTextVar( wxString* token, int aDepth ) const
 {
+    wxString variant;
+
+    if( GetBoard() )
+        variant = GetBoard()->GetCurrentVariant();
+
+    return ResolveTextVar( token, variant, aDepth );
+}
+
+
+bool FOOTPRINT::ResolveTextVar( wxString* token, const wxString& aVariantName, int aDepth ) const
+{
     if( GetBoard() && GetBoard()->GetBoardUse() == BOARD_USE::FPHOLDER )
         return false;
 
+    wxString variant = aVariantName;
+
     if( token->IsSameAs( wxT( "REFERENCE" ) ) )
     {
-        *token = Reference().GetShownText( false, aDepth + 1 );
+        if( const PCB_FIELD* reference = GetField( FIELD_T::REFERENCE ) )
+            *token = reference->GetShownText( false, aDepth + 1 );
+        else
+            token->Clear();
+
         return true;
     }
     else if( token->IsSameAs( wxT( "VALUE" ) ) )
     {
-        *token = Value().GetShownText( false, aDepth + 1 );
+        if( const PCB_FIELD* value = GetField( FIELD_T::VALUE ) )
+            *token = value->GetShownText( false, aDepth + 1 );
+        else
+            token->Clear();
+
         return true;
     }
     else if( token->IsSameAs( wxT( "LAYER" ) ) )
@@ -1233,9 +1472,76 @@ bool FOOTPRINT::ResolveTextVar( wxString* token, int aDepth ) const
             }
         }
     }
+    else if( token->IsSameAs( wxT( "EXCLUDE_FROM_BOM" ) ) )
+    {
+        *token = wxEmptyString;
+
+        if( GetExcludedFromBOMForVariant( variant ) )
+            *token = wxS( "Excluded from BOM" );
+
+        return true;
+    }
+    else if( token->IsSameAs( wxT( "EXCLUDE_FROM_POS_FILES" ) ) )
+    {
+        *token = wxEmptyString;
+
+        if( GetExcludedFromPosFilesForVariant( variant ) )
+            *token = wxS( "Excluded from position files" );
+
+        return true;
+    }
+    else if( token->IsSameAs( wxT( "EXCLUDE_FROM_BOARD" ) ) )
+    {
+        // Footprints are never excluded from board by definition
+        *token = wxEmptyString;
+        return true;
+    }
+    else if( token->IsSameAs( wxT( "EXCLUDE_FROM_SIM" ) ) )
+    {
+        *token = wxEmptyString;
+
+        if( GetExcludedFromSimForVariant( variant ) )
+            *token = wxS( "Excluded from simulation" );
+
+        return true;
+    }
+    else if( token->IsSameAs( wxT( "DNP" ) ) )
+    {
+        *token = wxEmptyString;
+
+        if( GetDNPForVariant( variant ) )
+            *token = wxS( "DNP" );
+
+        return true;
+    }
     else if( PCB_FIELD* field = GetField( *token ) )
     {
         *token = field->GetShownText( false, aDepth + 1 );
+        return true;
+    }
+    // The great property resolver: ${PROPERTY.My_Property}
+    else if( token->StartsWith( wxS( "PROPERTY." ) ) )
+    {
+        // Get the second half, convert _ to ' '
+        wxString propertyName = token->AfterFirst( '.' );
+        propertyName.Replace( wxS( "_" ), wxS( " " ) );
+
+        // Check if the property manager knows this property
+        PROPERTY_MANAGER& propMgr = PROPERTY_MANAGER::Instance();
+        PROPERTY_BASE*    property = propMgr.GetProperty( this, propertyName );
+
+        if( !property || property->IsHiddenFromPropertiesManager() )
+            return false;
+
+        if( !propMgr.IsAvailableFor( TYPE_HASH( *this ), property, const_cast<FOOTPRINT*>( this ) ) )
+            return false;
+
+        KICAD_DIFF::DIFF_VALUE value = KICAD_DIFF::WxAnyToDiffValue( Get( property ), property );
+
+        if( value.GetType() == KICAD_DIFF::DIFF_VALUE::T::NONE )
+            return false;
+
+        *token = value.ToDisplayString( EDA_UNITS::MM, pcbIUScale );
         return true;
     }
 
@@ -1305,6 +1611,7 @@ FOOTPRINT_VARIANT* FOOTPRINT::AddVariant( const wxString& aVariantName )
     FOOTPRINT_VARIANT variant( aVariantName );
     variant.SetDNP( IsDNP() );
     variant.SetExcludedFromBOM( IsExcludedFromBOM() );
+    variant.SetExcludedFromSim( IsExcludedFromSim() );
     variant.SetExcludedFromPosFiles( IsExcludedFromPosFiles() );
 
     auto inserted = m_variants.emplace( aVariantName, std::move( variant ) );
@@ -1381,6 +1688,22 @@ bool FOOTPRINT::GetExcludedFromBOMForVariant( const wxString& aVariantName ) con
 
     // Fall back to default if variant doesn't exist
     return IsExcludedFromBOM();
+}
+
+
+bool FOOTPRINT::GetExcludedFromSimForVariant( const wxString& aVariantName ) const
+{
+    // Empty variant name means default
+    if( aVariantName.IsEmpty() || aVariantName.CmpNoCase( GetDefaultVariantName() ) == 0 )
+        return IsExcludedFromSim();
+
+    const FOOTPRINT_VARIANT* variant = GetVariant( aVariantName );
+
+    if( variant )
+        return variant->GetExcludedFromSim();
+
+    // Fall back to default if variant doesn't exist
+    return IsExcludedFromSim();
 }
 
 
@@ -1537,7 +1860,13 @@ void FOOTPRINT::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aMode )
         {
             if( *it == aBoardItem )
             {
+                const wxString fieldName = ( *it )->GetUntranslatedName();
+
                 m_fields.erase( it );
+
+                for( auto& variant : m_variants )
+                    variant.second.RemoveFieldValue( fieldName );
+
                 break;
             }
         }
@@ -1640,8 +1969,13 @@ void FOOTPRINT::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aMode )
     }
 
     // If this footprint is on a board, update the board's item-by-id cache
-    if( BOARD* board = GetBoard(); board && board->IsItemIndexedById( this ) )
-        board->UncacheItemSubtreeById( aBoardItem );
+    if( BOARD* board = GetBoard() )
+    {
+        if( board->IsItemIndexedById( this ) )
+            board->UncacheItemSubtreeById( aBoardItem );
+
+        board->IncrementTimeStamp();
+    }
 
     aBoardItem->SetFlags( STRUCT_DELETED );
 
@@ -1715,13 +2049,36 @@ int FOOTPRINT::GetLikelyAttribute() const
 
 wxString FOOTPRINT::GetTypeName() const
 {
-    if( ( m_attributes & FP_SMD ) == FP_SMD )
+    if( GetFootprintType() == FOOTPRINT_TYPE::SMD )
         return _( "SMD" );
 
-    if( ( m_attributes & FP_THROUGH_HOLE ) == FP_THROUGH_HOLE )
+    if( GetFootprintType() == FOOTPRINT_TYPE::THROUGH_HOLE )
         return _( "Through hole" );
 
-    return _( "Other" );
+    return _( "Unspecified" );
+}
+
+
+FOOTPRINT_TYPE FOOTPRINT::GetFootprintType() const
+{
+    if( m_attributes & FP_SMD )
+        return FOOTPRINT_TYPE::SMD;
+
+    if( m_attributes & FP_THROUGH_HOLE )
+        return FOOTPRINT_TYPE::THROUGH_HOLE;
+
+    return FOOTPRINT_TYPE::UNSPECIFIED;
+}
+
+
+void FOOTPRINT::SetFootprintType( FOOTPRINT_TYPE aMountingStyle )
+{
+    m_attributes &= ~( FP_THROUGH_HOLE | FP_SMD );
+
+    if( aMountingStyle == FOOTPRINT_TYPE::THROUGH_HOLE )
+        m_attributes |= FP_THROUGH_HOLE;
+    else if( aMountingStyle == FOOTPRINT_TYPE::SMD )
+        m_attributes |= FP_SMD;
 }
 
 
@@ -1892,6 +2249,12 @@ const BOX2I FOOTPRINT::GetBoundingBox( bool aIncludeText ) const
             bbox.Merge( text->GetBoundingBox() );
         }
 
+        // A footprint is constructed with its mandatory fields, but they can be removed again
+        // through the editing dialogs or the scripting API, and the const accessors return
+        // nullptr rather than recreating them.
+        const PCB_FIELD* value = GetField( FIELD_T::VALUE );
+        const PCB_FIELD* reference = GetField( FIELD_T::REFERENCE );
+
         // This can be further optimized when aIncludeInvisibleText is true, but currently
         // leaving this as is until it's determined there is a noticeable speed hit.
         bool   valueLayerIsVisible = true;
@@ -1903,24 +2266,30 @@ const BOX2I FOOTPRINT::GetBoundingBox( bool aIncludeText ) const
             // not being present in the current PCB stackup.  Values, references, and all
             // footprint text can also be turned off via the GAL meta-layers, so the 2nd and
             // 3rd "&&" conditionals handle that.
-            valueLayerIsVisible = board->IsLayerVisible( Value().GetLayer() )
-                                  && board->IsElementVisible( LAYER_FP_VALUES )
-                                  && board->IsElementVisible( LAYER_FP_TEXT );
+            if( value )
+            {
+                valueLayerIsVisible = board->IsLayerVisible( value->GetLayer() )
+                                      && board->IsElementVisible( LAYER_FP_VALUES )
+                                      && board->IsElementVisible( LAYER_FP_TEXT );
+            }
 
-            refLayerIsVisible = board->IsLayerVisible( Reference().GetLayer() )
-                                && board->IsElementVisible( LAYER_FP_REFERENCES )
-                                && board->IsElementVisible( LAYER_FP_TEXT );
+            if( reference )
+            {
+                refLayerIsVisible = board->IsLayerVisible( reference->GetLayer() )
+                                    && board->IsElementVisible( LAYER_FP_REFERENCES )
+                                    && board->IsElementVisible( LAYER_FP_TEXT );
+            }
         }
 
 
-        if( ( Value().IsVisible() && valueLayerIsVisible ) || noDrawItems )
+        if( value && ( ( value->IsVisible() && valueLayerIsVisible ) || noDrawItems ) )
         {
-            bbox.Merge( Value().GetBoundingBox() );
+            bbox.Merge( value->GetBoundingBox() );
         }
 
-        if( ( Reference().IsVisible() && refLayerIsVisible ) || noDrawItems )
+        if( reference && ( ( reference->IsVisible() && refLayerIsVisible ) || noDrawItems ) )
         {
-            bbox.Merge( Reference().GetBoundingBox() );
+            bbox.Merge( reference->GetBoundingBox() );
         }
     }
 
@@ -2159,7 +2528,8 @@ void FOOTPRINT::GetMsgPanelInfo( EDA_DRAW_FRAME* aFrame, std::vector<MSG_PANEL_I
 
     // Don't use GetShownText(); we want to see the variable references here
     aList.emplace_back( UnescapeString( Reference().GetText() ),
-                        UnescapeString( GetFieldValueForVariant( variant, GetCanonicalFieldName( FIELD_T::VALUE ) ) ) );
+                        UnescapeString( GetFieldValueForVariant(
+                                variant, GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED ) ) ) );
 
     if( aFrame->IsType( FRAME_FOOTPRINT_VIEWER )
         || aFrame->IsType( FRAME_FOOTPRINT_CHOOSER )
@@ -2215,6 +2585,9 @@ void FOOTPRINT::GetMsgPanelInfo( EDA_DRAW_FRAME* aFrame, std::vector<MSG_PANEL_I
 
     if( GetExcludedFromBOMForVariant( variant ) )
         addToken( &attrs, _( "exclude from BOM" ) );
+
+    if( GetExcludedFromSimForVariant( variant ) )
+        addToken( &attrs, _( "exclude from simulation" ) );
 
     if( GetDNPForVariant( variant ) )
         addToken( &attrs, _( "DNP" ) );
@@ -3497,6 +3870,16 @@ BOARD_ITEM* FOOTPRINT::DuplicateItem( bool addToParentGroup, BOARD_COMMIT* aComm
             Add( dimension );
 
         new_item = dimension;
+        break;
+    }
+
+    case PCB_TABLE_T:
+    {
+        new_item = aItem->Duplicate( addToParentGroup, aCommit );
+
+        if( addToFootprint )
+            Add( new_item );
+
         break;
     }
 
@@ -4994,6 +5377,13 @@ void FOOTPRINT::EmbedFonts()
     for( KIFONT::OUTLINE_FONT* font : GetFonts() )
     {
         EMBEDDED_FILES::EMBEDDED_FILE* file = GetEmbeddedFiles()->AddFile( font->GetFileName(), false );
+
+        if( !file )
+        {
+            wxLogTrace( "EMBED", "Failed to add font file: %s", font->GetFileName() );
+            continue;
+        }
+
         file->type = EMBEDDED_FILES::EMBEDDED_FILE::FILE_TYPE::FONT;
     }
 }
@@ -5094,6 +5484,11 @@ static struct FOOTPRINT_DESC
 {
     FOOTPRINT_DESC()
     {
+        ENUM_MAP<FOOTPRINT_TYPE>::Instance()
+                .Map( FOOTPRINT_TYPE::THROUGH_HOLE, _HKI( "Through hole" ) )
+                .Map( FOOTPRINT_TYPE::SMD,          _HKI( "SMD" ) )
+                .Map( FOOTPRINT_TYPE::UNSPECIFIED,  _HKI( "Unspecified" ) );
+
         ENUM_MAP<ZONE_CONNECTION>& zcMap = ENUM_MAP<ZONE_CONNECTION>::Instance();
 
         if( zcMap.Choices().GetCount() == 0 )
@@ -5138,23 +5533,23 @@ static struct FOOTPRINT_DESC
                     return true;
                 };
 
-        auto layer = new PROPERTY_ENUM<FOOTPRINT, PCB_LAYER_ID>( _HKI( "Layer" ),
-                    &FOOTPRINT::SetLayerAndFlip, &FOOTPRINT::GetLayer );
-        layer->SetChoices( fpLayers );
-        layer->SetAvailableFunc( isNotFootprintHolder );
-        propMgr.ReplaceProperty( TYPE_HASH( BOARD_ITEM ), _HKI( "Layer" ), layer );
+        propMgr.ReplaceProperty( TYPE_HASH( BOARD_ITEM ), _HKI( "Layer" ),
+                    new PROPERTY_ENUM<FOOTPRINT, PCB_LAYER_ID>( _HKI( "Layer" ),
+                                &FOOTPRINT::SetLayerAndFlip, &FOOTPRINT::GetLayer ) )
+                            .SetAvailableFunc( isNotFootprintHolder )
+                            .SetChoices( fpLayers );
 
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, double>( _HKI( "Orientation" ),
                     &FOOTPRINT::SetOrientationDegrees, &FOOTPRINT::GetOrientationDegrees,
                     PROPERTY_DISPLAY::PT_DEGREE ) )
                .SetAvailableFunc( isNotFootprintHolder );
 
-        propMgr.AddProperty( new PROPERTY<FOOTPRINT, double>( _HKI( "Scale X" ), &FOOTPRINT::SetScaleX,
-                                                              &FOOTPRINT::GetScaleX ) )
+        propMgr.AddProperty( new PROPERTY<FOOTPRINT, double>( _HKI( "Scale X" ),
+                    &FOOTPRINT::SetScaleX, &FOOTPRINT::GetScaleX ) )
                 .SetAvailableFunc( isNotFootprintHolder );
 
-        propMgr.AddProperty( new PROPERTY<FOOTPRINT, double>( _HKI( "Scale Y" ), &FOOTPRINT::SetScaleY,
-                                                              &FOOTPRINT::GetScaleY ) )
+        propMgr.AddProperty( new PROPERTY<FOOTPRINT, double>( _HKI( "Scale Y" ),
+                    &FOOTPRINT::SetScaleY, &FOOTPRINT::GetScaleY ) )
                 .SetAvailableFunc( isNotFootprintHolder );
 
         const wxString groupFields = _HKI( "Fields" );
@@ -5183,6 +5578,9 @@ static struct FOOTPRINT_DESC
 
         const wxString groupAttributes = _HKI( "Attributes" );
 
+        propMgr.AddProperty( new PROPERTY_ENUM<FOOTPRINT, FOOTPRINT_TYPE>( _HKI( "Footprint Type" ),
+                    &FOOTPRINT::SetFootprintType, &FOOTPRINT::GetFootprintType ),
+                    groupAttributes );
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, bool>( _HKI( "Not in Schematic" ),
                     &FOOTPRINT::SetBoardOnly, &FOOTPRINT::IsBoardOnly ), groupAttributes );
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, bool>( _HKI( "Exclude From Position Files" ),
@@ -5190,6 +5588,9 @@ static struct FOOTPRINT_DESC
                     groupAttributes );
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, bool>( _HKI( "Exclude From Bill of Materials" ),
                     &FOOTPRINT::SetExcludedFromBOM, &FOOTPRINT::IsExcludedFromBOM ),
+                    groupAttributes );
+        propMgr.AddProperty( new PROPERTY<FOOTPRINT, bool>( _HKI( "Exclude From Simulation" ),
+                    &FOOTPRINT::SetExcludedFromSim, &FOOTPRINT::IsExcludedFromSim ),
                     groupAttributes );
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, bool>( _HKI( "Do not Populate" ),
                     &FOOTPRINT::SetDNP, &FOOTPRINT::IsDNP ),
@@ -5201,20 +5602,20 @@ static struct FOOTPRINT_DESC
                     &FOOTPRINT::SetAllowMissingCourtyard, &FOOTPRINT::AllowMissingCourtyard ),
                     groupOverrides );
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, std::optional<int>>( _HKI( "Clearance Override" ),
-                    &FOOTPRINT::SetLocalClearance, &FOOTPRINT::GetLocalClearance,
-                    PROPERTY_DISPLAY::PT_SIZE ),
-                    groupOverrides );
+                    &FOOTPRINT::SetLocalClearance, &FOOTPRINT::GetLocalClearance, PROPERTY_DISPLAY::PT_SIZE ),
+                    groupOverrides ).SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, std::optional<int>>( _HKI( "Solderpaste Margin Override" ),
                     &FOOTPRINT::SetLocalSolderPasteMargin, &FOOTPRINT::GetLocalSolderPasteMargin,
                     PROPERTY_DISPLAY::PT_SIZE ),
-                    groupOverrides );
+                    groupOverrides ).SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<FOOTPRINT, std::optional<double>>( _HKI( "Solderpaste Margin Ratio Override" ),
-                    &FOOTPRINT::SetLocalSolderPasteMarginRatio,
-                    &FOOTPRINT::GetLocalSolderPasteMarginRatio,
+                    &FOOTPRINT::SetLocalSolderPasteMarginRatio, &FOOTPRINT::GetLocalSolderPasteMarginRatio,
                     PROPERTY_DISPLAY::PT_RATIO ),
-                    groupOverrides );
+                    groupOverrides ).SetIsCopyable();
         propMgr.AddProperty( new PROPERTY_ENUM<FOOTPRINT, ZONE_CONNECTION>( _HKI( "Zone Connection Style" ),
                     &FOOTPRINT::SetLocalZoneConnection, &FOOTPRINT::GetLocalZoneConnection ),
-                    groupOverrides );
+                    groupOverrides ).SetIsCopyable();
     }
 } _FOOTPRINT_DESC;
+
+ENUM_TO_WXANY( FOOTPRINT_TYPE );

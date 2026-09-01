@@ -53,11 +53,12 @@ PCB_GROUP::PCB_GROUP( BOARD_ITEM* aParent, KICAD_T idtype, PCB_LAYER_ID aLayer )
 
 void PCB_GROUP::Serialize( google::protobuf::Any &aContainer ) const
 {
-    using namespace kiapi::board::types;
-    Group group;
+    using namespace kiapi::common::types;
+    kiapi::board::types::Group group;
 
     group.mutable_id()->set_value( m_Uuid.AsStdString() );
     group.set_name( GetName().ToUTF8() );
+    group.set_locked( IsLocked() ? LockedState::LS_LOCKED : LockedState::LS_UNLOCKED );
 
     for( EDA_ITEM* item : GetItems() )
     {
@@ -65,9 +66,15 @@ void PCB_GROUP::Serialize( google::protobuf::Any &aContainer ) const
         itemId->set_value( item->m_Uuid.AsStdString() );
     }
 
-    if( const BOARD* board = GetBoard() )
+    if( FOOTPRINT* parent = GetParentFootprint() )
+        group.mutable_parent()->set_value( parent->m_Uuid.AsStdString() );
+    else if( const BOARD* board = GetBoard() )
         group.mutable_parent()->set_value( board->m_Uuid.AsStdString() );
 
+    if( HasDesignBlockLink() )
+        kiapi::common::PackLibId( group.mutable_lib_id(), GetDesignBlockLibId() );
+
+    kiapi::common::PackCustomProperties( group.mutable_custom_properties(), *this );
     aContainer.PackFrom( group );
 }
 
@@ -81,6 +88,7 @@ bool PCB_GROUP::Deserialize( const google::protobuf::Any &aContainer )
 
     SetUuidDirect( KIID( group.id().value() ) );
     SetName( wxString( group.name().c_str(), wxConvUTF8 ) );
+    SetLocked( group.locked() == kiapi::common::types::LockedState::LS_LOCKED );
 
     BOARD* board = GetBoard();
 
@@ -94,6 +102,11 @@ bool PCB_GROUP::Deserialize( const google::protobuf::Any &aContainer )
         if( BOARD_ITEM* item = board->ResolveItem( id, true ) )
             AddItem( item );
     }
+
+    if( group.has_lib_id() )
+        SetDesignBlockLibId( kiapi::common::UnpackLibId( group.lib_id() ) );
+
+    kiapi::common::UnpackCustomProperties( group.custom_properties(), *this );
 
     return true;
 }
@@ -274,15 +287,21 @@ void PCB_GROUP::swapData( BOARD_ITEM* aImage )
 
     std::swap( *this, *image );
 
+    swapChildOwnership( image );
+}
+
+
+void PCB_GROUP::swapChildOwnership( PCB_GROUP* aImage )
+{
     // A group doesn't own its children (they're owned by the board), so undo doesn't do a
     // deep clone when making an image.  However, it's still safest to update the parentGroup
     // pointers of the group's children. We must do it in the right order in case any of the
     // children are shared (ie: image first, "this" second so that any shared children end up
     // with "this").
-    image->RunOnChildren(
+    aImage->RunOnChildren(
             [&]( BOARD_ITEM* child )
             {
-                child->SetParentGroup( image );
+                child->SetParentGroup( aImage );
             },
             RECURSE_MODE::NO_RECURSE );
 
@@ -567,8 +586,8 @@ static struct PCB_GROUP_DESC
 
         const wxString groupTab = _HKI( "Group Properties" );
 
-        propMgr.AddProperty(
-                new PROPERTY<EDA_GROUP, wxString>( _HKI( "Name" ), &PCB_GROUP::SetName, &PCB_GROUP::GetName ),
-                groupTab );
+        propMgr.AddProperty( new PROPERTY<EDA_GROUP, wxString>( _HKI( "Name" ),
+                    &PCB_GROUP::SetName, &PCB_GROUP::GetName ),
+                    groupTab );
     }
 } _PCB_GROUP_DESC;
